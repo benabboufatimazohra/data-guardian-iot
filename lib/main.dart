@@ -1,3 +1,14 @@
+// lib/main.dart
+//
+// ERREURS CORRIGÉES :
+//   1. undefined_method 'ExportScreen'
+//      → ExportScreen n'était pas importé.
+//        Solution : ajouter l'import de export_screen.dart.
+//
+//   2. deprecated_member_use 'withOpacity'
+//      → withOpacity() est déprécié depuis Flutter 3.x.
+//        Solution : remplacé par .withValues(alpha: 0.15).
+
 import 'package:flutter/material.dart';
 import 'package:data_monitoring_app/screens/login_screen.dart';
 import 'package:data_monitoring_app/screens/dashboard_screen.dart';
@@ -6,6 +17,7 @@ import 'package:data_monitoring_app/screens/device_detail_screen.dart';
 import 'package:data_monitoring_app/screens/history_screen.dart';
 import 'package:data_monitoring_app/screens/alert_analysis_screen.dart';
 import 'package:data_monitoring_app/screens/settings_screen.dart';
+import 'package:data_monitoring_app/screens/export_screen.dart'; // ← AJOUTÉ
 
 void main() {
   runApp(const DataGuardianApp());
@@ -30,7 +42,8 @@ class DataGuardianApp extends StatelessWidget {
         ),
         navigationBarTheme: NavigationBarThemeData(
           backgroundColor: const Color(0xFF1A2332),
-          indicatorColor: const Color(0xFF3C83F6).withOpacity(0.15),
+          // withValues(alpha:) remplace withOpacity() déprécié
+          indicatorColor: const Color(0xFF3C83F6).withValues(alpha: 0.15),
         ),
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFF101722),
@@ -44,14 +57,7 @@ class DataGuardianApp extends StatelessWidget {
         ),
         fontFamily: 'Inter',
       ),
-      // ── Starting screen ──────────────────────────────────────────────────
       initialRoute: '/login',
-      // ── All app routes ───────────────────────────────────────────────────
-      // Like a URL map: any screen can navigate to any other by name.
-      //   Navigator.pushNamed(context, '/dashboard')  → go to dashboard
-      //   Navigator.pushReplacementNamed(ctx, '/login') → replace current
-      //   Navigator.pushNamedAndRemoveUntil(ctx, '/login', (_) => false)
-      //      → logout: clear entire back stack and go to login
       routes: {
         '/login':          (ctx) => const LoginScreen(),
         '/dashboard':      (ctx) => const DashboardScreen(),
@@ -60,6 +66,7 @@ class DataGuardianApp extends StatelessWidget {
         '/device-detail':  (ctx) => const DeviceDetailScreen(),
         '/history':        (ctx) => const HistoryScreen(),
         '/settings':       (ctx) => const SettingsScreen(),
+        '/export':         (ctx) => const ExportScreen(), // ← const ajouté
       },
       onUnknownRoute: (settings) => MaterialPageRoute(
         builder: (_) => Scaffold(

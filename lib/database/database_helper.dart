@@ -1,25 +1,23 @@
 // lib/database/database_helper.dart
 //
-// ─────────────────────────────────────────────────────────────────────────────
-// DatabaseHelper — SQLite local database
-// Stores: sensor readings + alerts history
+// CORRECTION PRINCIPALE :
+//   Les classes AppUser, EspDevice, SensorReading, SensorStats qui étaient
+//   définies en bas de ce fichier ont été SUPPRIMÉES.
+//   Elles vivent maintenant dans leurs propres fichiers dans lib/models/.
+//   Les garder ici causait l'erreur "ambiguous_import" dans tous les écrans.
 //
-// SETUP — add to pubspec.yaml:
-//   sqflite: ^2.3.0
-//   path: ^1.9.0
-//
-// Then: flutter pub get
-// ─────────────────────────────────────────────────────────────────────────────
+//   Les imports '../models/app_user.dart' et '../models/esp_device.dart'
+//   ont aussi été supprimés — un seul import '../models/models.dart' suffit.
 
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/models.dart';
 
 class DatabaseHelper {
-  // Singleton
   DatabaseHelper._();
   static final DatabaseHelper instance = DatabaseHelper._();
-
   static Database? _db;
 
   Future<Database> get database async {
@@ -27,60 +25,228 @@ class DatabaseHelper {
     return _db!;
   }
 
-  // ─── Init & schema ────────────────────────────────────────────────────────
+  // ─── Initialisation ───────────────────────────────────────────────────────
   Future<Database> _initDb() async {
-    final dbPath = await getDatabasesPath();
-    final path   = join(dbPath, 'dataguardian.db');
+    final path = join(await getDatabasesPath(), 'dataguardian_v2.db');
+    return openDatabase(path, version: 1, onCreate: _onCreate);
+  }
 
-    return openDatabase(
-      path,
-      version: 1,
-      onCreate: (db, version) async {
-        // Table: sensor readings
-        await db.execute('''
-          CREATE TABLE sensor_readings (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            device_id   TEXT    NOT NULL,
-            temperature REAL    NOT NULL,
-            humidity    REAL    NOT NULL,
-            water_leak  INTEGER NOT NULL DEFAULT 0,
-            water_level INTEGER NOT NULL DEFAULT 0,
-            water_pct   REAL    NOT NULL DEFAULT 0,
-            recorded_at TEXT    NOT NULL
-          )
-        ''');
+  Future<void> _onCreate(Database db, int version) async {
+    // ── Table users ──────────────────────────────────────────────────────────
+    // role : 'admin' | 'responsable'
+    // assigned_esp_id : null pour admin (voit tout), sinon l'id de l'ESP assigné
+    await db.execute('''
+      CREATE TABLE users (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        full_name       TEXT    NOT NULL,
+        email           TEXT    NOT NULL UNIQUE,
+        password_hash   TEXT    NOT NULL,
+        role            TEXT    NOT NULL DEFAULT 'responsable',
+        assigned_esp_id TEXT,
+        created_at      TEXT    NOT NULL
+      )
+    ''');
 
-        // Table: alerts
-        await db.execute('''
-          CREATE TABLE alerts (
-            id          TEXT    PRIMARY KEY,
-            device_id   TEXT    NOT NULL,
-            severity    TEXT    NOT NULL,
-            title       TEXT    NOT NULL,
-            location    TEXT    NOT NULL DEFAULT '',
-            is_resolved INTEGER NOT NULL DEFAULT 0,
-            created_at  TEXT    NOT NULL
-          )
-        ''');
+    // ── Table esp_devices ────────────────────────────────────────────────────
+    await db.execute('''
+      CREATE TABLE esp_devices (
+        id          TEXT    PRIMARY KEY,
+        name        TEXT    NOT NULL,
+        ip_address  TEXT    NOT NULL,
+        location    TEXT    NOT NULL DEFAULT '',
+        room        TEXT    NOT NULL DEFAULT '',
+        is_online   INTEGER NOT NULL DEFAULT 0,
+        firmware    TEXT    NOT NULL DEFAULT 'v2.0.4',
+        last_seen   TEXT,
+        created_at  TEXT    NOT NULL
+      )
+    ''');
 
-        // Index for fast time-range queries
-        await db.execute(
-          'CREATE INDEX idx_readings_time ON sensor_readings(recorded_at)');
-        await db.execute(
-          'CREATE INDEX idx_alerts_time   ON alerts(created_at)');
+    // ── Table sensor_readings ────────────────────────────────────────────────
+    await db.execute('''
+      CREATE TABLE sensor_readings (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        esp_id      TEXT    NOT NULL,
+        temperature REAL    NOT NULL,
+        humidity    REAL    NOT NULL,
+        water_leak  INTEGER NOT NULL DEFAULT 0,
+        water_level INTEGER NOT NULL DEFAULT 0,
+        water_pct   REAL    NOT NULL DEFAULT 0,
+        recorded_at TEXT    NOT NULL,
+        FOREIGN KEY (esp_id) REFERENCES esp_devices(id)
+      )
+    ''');
+
+    // ── Table alerts ─────────────────────────────────────────────────────────
+    await db.execute('''
+      CREATE TABLE alerts (
+        id          TEXT    PRIMARY KEY,
+        esp_id      TEXT    NOT NULL,
+        device_id   TEXT    NOT NULL,
+        severity    TEXT    NOT NULL,
+        title       TEXT    NOT NULL,
+        location    TEXT    NOT NULL DEFAULT '',
+        is_resolved INTEGER NOT NULL DEFAULT 0,
+        created_at  TEXT    NOT NULL,
+        FOREIGN KEY (esp_id) REFERENCES esp_devices(id)
+      )
+    ''');
+
+    // Index pour accélérer les requêtes temporelles
+    await db.execute('CREATE INDEX idx_readings_esp_time ON sensor_readings(esp_id, recorded_at)');
+    await db.execute('CREATE INDEX idx_alerts_esp_time   ON alerts(esp_id, created_at)');
+    await db.execute('CREATE INDEX idx_readings_time     ON sensor_readings(recorded_at)');
+
+    await _seedData(db);
+  }
+
+  Future<void> _seedData(Database db) async {
+    final now = DateTime.now().toIso8601String();
+
+    // Administrateur par défaut
+    await db.insert('users', {
+      'full_name'       : 'System Administrator',
+      'email'           : 'admin@dataguardian.com',
+      'password_hash'   : _hashPassword('Admin@1234'),
+      'role'            : 'admin',
+      'assigned_esp_id' : null,
+      'created_at'      : now,
+    });
+
+    // ESP de démonstration
+    await db.insert('esp_devices', {
+      'id'         : 'ESP8266-01',
+      'name'       : 'ESP8266 — Rack A',
+      'ip_address' : '192.168.1.104',
+      'location'   : 'Rack A-04',
+      'room'       : 'Server Room A',
+      'is_online'  : 1,
+      'firmware'   : 'v2.0.4',
+      'last_seen'  : now,
+      'created_at' : now,
+    });
+
+    // Responsable assigné à l'ESP de démo
+    await db.insert('users', {
+      'full_name'       : 'Mohammed Alami',
+      'email'           : 'alami@dataguardian.com',
+      'password_hash'   : _hashPassword('Resp@1234'),
+      'role'            : 'responsable',
+      'assigned_esp_id' : 'ESP8266-01',
+      'created_at'      : now,
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // USERS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// Connexion : vérifie email + hash SHA-256 du mot de passe
+  Future<AppUser?> login(String email, String password) async {
+    final db   = await database;
+    final hash = _hashPassword(password);
+    final rows = await db.query('users',
+        where:     'email = ? AND password_hash = ?',
+        whereArgs: [email.trim().toLowerCase(), hash]);
+    if (rows.isEmpty) return null;
+    return AppUser.fromMap(rows.first);
+  }
+
+  /// Crée un utilisateur — hache le mot de passe avant insertion
+  Future<int> createUser(AppUser user, String password) async {
+    final db = await database;
+    return db.insert('users', {
+      'full_name'       : user.fullName,
+      'email'           : user.email.toLowerCase(),
+      'password_hash'   : _hashPassword(password),
+      'role'            : user.role,
+      'assigned_esp_id' : user.assignedEspId,
+      'created_at'      : DateTime.now().toIso8601String(),
+    });
+  }
+
+  /// Retourne tous les utilisateurs triés : admins en premier, puis par nom
+  Future<List<AppUser>> getAllUsers() async {
+    final db   = await database;
+    final rows = await db.query('users', orderBy: 'role DESC, full_name ASC');
+    return rows.map(AppUser.fromMap).toList();
+  }
+
+  /// Met à jour nom, email, rôle et ESP assigné (pas le mot de passe)
+  Future<void> updateUser(AppUser user) async {
+    final db = await database;
+    await db.update('users',
+      {
+        'full_name'       : user.fullName,
+        'email'           : user.email,
+        'role'            : user.role,
+        'assigned_esp_id' : user.assignedEspId,
       },
-    );
+      where: 'id = ?', whereArgs: [user.id]);
+  }
+
+  /// Supprime un utilisateur par son id
+  Future<void> deleteUser(int userId) async {
+    final db = await database;
+    await db.delete('users', where: 'id = ?', whereArgs: [userId]);
+  }
+
+  /// Change le mot de passe — rehache avant mise à jour
+  Future<void> changePassword(int userId, String newPassword) async {
+    final db = await database;
+    await db.update('users',
+      {'password_hash': _hashPassword(newPassword)},
+      where: 'id = ?', whereArgs: [userId]);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ESP DEVICES
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// Insert ou remplace si l'id existe déjà (ConflictAlgorithm.replace)
+  Future<void> upsertEsp(EspDevice esp) async {
+    final db = await database;
+    await db.insert('esp_devices', esp.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// Tous les ESP triés par nom
+  Future<List<EspDevice>> getAllEsps() async {
+    final db   = await database;
+    final rows = await db.query('esp_devices', orderBy: 'name ASC');
+    return rows.map(EspDevice.fromMap).toList();
+  }
+
+  /// Admin → tous les ESP / Responsable → seulement son ESP assigné
+  Future<List<EspDevice>> getEspsForUser(AppUser user) async {
+    if (user.isAdmin) return getAllEsps();
+    final db   = await database;
+    final rows = await db.query('esp_devices',
+        where: 'id = ?', whereArgs: [user.assignedEspId]);
+    return rows.map(EspDevice.fromMap).toList();
+  }
+
+  /// Met à jour le statut en ligne et l'horodatage last_seen
+  Future<void> setEspOnline(String espId, bool isOnline) async {
+    final db = await database;
+    await db.update('esp_devices',
+      {
+        'is_online' : isOnline ? 1 : 0,
+        'last_seen' : DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?', whereArgs: [espId]);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // SENSOR READINGS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /// Insert one reading — called automatically by EspService every 5s
+  /// Sauvegarde une lecture et marque l'ESP comme online
   Future<int> insertReading(EnvironmentData data) async {
     final db = await database;
+    await setEspOnline(data.deviceId, true);
     return db.insert('sensor_readings', {
-      'device_id'  : data.deviceId,
+      'esp_id'     : data.deviceId,
       'temperature': data.temperature,
       'humidity'   : data.humidity,
       'water_leak' : data.waterLeakDetected ? 1 : 0,
@@ -90,51 +256,33 @@ class DatabaseHelper {
     });
   }
 
-  /// Get last N readings (most recent first)
-  Future<List<SensorReading>> getReadings({int limit = 100}) async {
+  /// Lectures pour export — filtre par ESP + plage temporelle
+  Future<List<SensorReading>> getReadingsForExport({
+    required String   espId,
+    required DateTime from,
+    required DateTime to,
+  }) async {
     final db   = await database;
     final rows = await db.query(
       'sensor_readings',
-      orderBy: 'recorded_at DESC',
-      limit:   limit,
-    );
-    return rows.map(SensorReading.fromMap).toList();
-  }
-
-  /// Get readings for a specific time range
-  Future<List<SensorReading>> getReadingsBetween(
-      DateTime from, DateTime to) async {
-    final db   = await database;
-    final rows = await db.query(
-      'sensor_readings',
-      where:     'recorded_at BETWEEN ? AND ?',
-      whereArgs: [from.toIso8601String(), to.toIso8601String()],
+      where:     'esp_id = ? AND recorded_at BETWEEN ? AND ?',
+      whereArgs: [espId, from.toIso8601String(), to.toIso8601String()],
       orderBy:   'recorded_at ASC',
     );
     return rows.map(SensorReading.fromMap).toList();
   }
 
-  /// Get readings for last N hours
-  Future<List<SensorReading>> getReadingsLastHours(int hours) async {
+  /// Raccourci : lectures des N dernières heures pour un ESP
+  Future<List<SensorReading>> getReadingsLastHours(String espId, int hours) async {
     final from = DateTime.now().subtract(Duration(hours: hours));
-    final to   = DateTime.now();
-    return getReadingsBetween(from, to);
+    return getReadingsForExport(espId: espId, from: from, to: DateTime.now());
   }
 
-  /// Latest single reading
-  Future<SensorReading?> getLatestReading() async {
-    final db   = await database;
-    final rows = await db.query(
-      'sensor_readings',
-      orderBy: 'recorded_at DESC',
-      limit:   1,
-    );
-    if (rows.isEmpty) return null;
-    return SensorReading.fromMap(rows.first);
-  }
-
-  /// Stats: min/max/avg for a time range
-  Future<SensorStats> getStats({int hoursBack = 24}) async {
+  /// Stats agrégées MIN/MAX/AVG pour un ESP sur une période
+  Future<SensorStats> getStats({
+    required String espId,
+    int hoursBack = 24,
+  }) async {
     final db   = await database;
     final from = DateTime.now()
         .subtract(Duration(hours: hoursBack))
@@ -151,17 +299,19 @@ class DatabaseHelper {
         MAX(water_leak)  as had_leak,
         COUNT(*)         as total
       FROM sensor_readings
-      WHERE recorded_at >= ?
-    ''', [from]);
+      WHERE esp_id = ? AND recorded_at >= ?
+    ''', [espId, from]);
 
-    if (result.isEmpty || result.first['total'] == 0) return SensorStats.empty();
+    if (result.isEmpty || result.first['total'] == 0) {
+      return SensorStats.empty();
+    }
     return SensorStats.fromMap(result.first);
   }
 
-  /// Delete readings older than N days (keep DB small)
+  /// Purge les lectures plus anciennes que keepDays jours
   Future<int> deleteOldReadings(int keepDays) async {
-    final db      = await database;
-    final cutoff  = DateTime.now()
+    final db     = await database;
+    final cutoff = DateTime.now()
         .subtract(Duration(days: keepDays))
         .toIso8601String();
     return db.delete('sensor_readings',
@@ -172,146 +322,70 @@ class DatabaseHelper {
   // ALERTS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /// Insert or replace an alert
-  Future<void> insertAlert(AlertModel alert) async {
+  /// Insert ou remplace une alerte (les alertes live ont des ids fixes)
+  Future<void> insertAlert(AlertModel alert, {String espId = ''}) async {
     final db = await database;
-    await db.insert(
-      'alerts',
-      {
-        'id'         : alert.id,
-        'device_id'  : alert.deviceId,
-        'severity'   : alert.severity.name,
-        'title'      : alert.title,
-        'location'   : alert.location,
-        'is_resolved': alert.isResolved ? 1 : 0,
-        'created_at' : alert.timestamp.toIso8601String(),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('alerts', {
+      'id'         : alert.id,
+      'esp_id'     : espId.isEmpty ? alert.deviceId : espId,
+      'device_id'  : alert.deviceId,
+      'severity'   : alert.severity.name,
+      'title'      : alert.title,
+      'location'   : alert.location,
+      'is_resolved': alert.isResolved ? 1 : 0,
+      'created_at' : alert.timestamp.toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  /// Get all alerts (most recent first)
-  Future<List<AlertModel>> getAlerts({int limit = 50}) async {
+  /// Alertes pour export — filtre par ESP + plage temporelle
+  Future<List<AlertModel>> getAlertsForExport({
+    required String   espId,
+    required DateTime from,
+    required DateTime to,
+  }) async {
     final db   = await database;
-    final rows = await db.query(
-      'alerts',
-      orderBy: 'created_at DESC',
-      limit:   limit,
-    );
+    final rows = await db.query('alerts',
+        where:     'esp_id = ? AND created_at BETWEEN ? AND ?',
+        whereArgs: [espId, from.toIso8601String(), to.toIso8601String()],
+        orderBy:   'created_at ASC');
     return rows.map(_alertFromMap).toList();
   }
 
-  /// Get only unresolved alerts
-  Future<List<AlertModel>> getActiveAlerts() async {
+  /// Alertes non résolues pour un ESP
+  Future<List<AlertModel>> getActiveAlerts(String espId) async {
     final db   = await database;
-    final rows = await db.query(
-      'alerts',
-      where:   'is_resolved = 0',
-      orderBy: 'created_at DESC',
-    );
+    final rows = await db.query('alerts',
+        where:     'esp_id = ? AND is_resolved = 0',
+        whereArgs: [espId],
+        orderBy:   'created_at DESC');
     return rows.map(_alertFromMap).toList();
   }
 
-  /// Mark alert as resolved
+  /// Marque une alerte comme résolue
   Future<void> resolveAlert(String alertId) async {
     final db = await database;
-    await db.update(
-      'alerts',
-      {'is_resolved': 1},
-      where:     'id = ?',
-      whereArgs: [alertId],
-    );
+    await db.update('alerts', {'is_resolved': 1},
+        where: 'id = ?', whereArgs: [alertId]);
   }
 
-  /// Count unresolved alerts
-  Future<int> getActiveAlertCount() async {
-    final db     = await database;
-    final result = await db.rawQuery(
-        'SELECT COUNT(*) as cnt FROM alerts WHERE is_resolved = 0');
-    return (result.first['cnt'] as int?) ?? 0;
-  }
-
+  /// Convertit une ligne SQL en AlertModel
   AlertModel _alertFromMap(Map<String, dynamic> m) => AlertModel(
-    id:         m['id']          as String,
-    deviceId:   m['device_id']   as String,
+    id:         m['id']        as String,
+    deviceId:   m['device_id'] as String,
     severity:   AlertSeverity.values.firstWhere(
-        (e) => e.name == m['severity'], orElse: () => AlertSeverity.info),
-    title:      m['title']       as String,
-    location:   m['location']    as String? ?? '',
+        (e) => e.name == m['severity'],
+        orElse: () => AlertSeverity.info),
+    title:      m['title']     as String,
+    location:   m['location']  as String? ?? '',
     isResolved: (m['is_resolved'] as int) == 1,
     timestamp:  DateTime.parse(m['created_at'] as String),
   );
 
-  // ─── Close ────────────────────────────────────────────────────────────────
-  Future<void> close() async {
-    final db = await database;
-    await db.close();
-  }
-}
+  // ─── Utilitaires ─────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Data classes for query results
-// ─────────────────────────────────────────────────────────────────────────────
+  /// Hash SHA-256 du mot de passe — jamais stocké en clair
+  String _hashPassword(String password) =>
+      sha256.convert(utf8.encode(password)).toString();
 
-class SensorReading {
-  final int    id;
-  final String deviceId;
-  final double temperature;
-  final double humidity;
-  final bool   waterLeak;
-  final int    waterLevel;
-  final double waterPercent;
-  final DateTime recordedAt;
-
-  const SensorReading({
-    required this.id,
-    required this.deviceId,
-    required this.temperature,
-    required this.humidity,
-    required this.waterLeak,
-    required this.waterLevel,
-    required this.waterPercent,
-    required this.recordedAt,
-  });
-
-  factory SensorReading.fromMap(Map<String, dynamic> m) => SensorReading(
-    id:           m['id']          as int,
-    deviceId:     m['device_id']   as String,
-    temperature:  (m['temperature'] as num).toDouble(),
-    humidity:     (m['humidity']    as num).toDouble(),
-    waterLeak:    (m['water_leak']  as int) == 1,
-    waterLevel:   m['water_level']  as int,
-    waterPercent: (m['water_pct']   as num).toDouble(),
-    recordedAt:   DateTime.parse(m['recorded_at'] as String),
-  );
-}
-
-class SensorStats {
-  final double tempMin, tempMax, tempAvg;
-  final double humMin,  humMax,  humAvg;
-  final bool   hadLeak;
-  final int    totalReadings;
-
-  const SensorStats({
-    required this.tempMin, required this.tempMax, required this.tempAvg,
-    required this.humMin,  required this.humMax,  required this.humAvg,
-    required this.hadLeak, required this.totalReadings,
-  });
-
-  factory SensorStats.fromMap(Map<String, dynamic> m) => SensorStats(
-    tempMin:       (m['temp_min'] as num).toDouble(),
-    tempMax:       (m['temp_max'] as num).toDouble(),
-    tempAvg:       (m['temp_avg'] as num).toDouble(),
-    humMin:        (m['hum_min']  as num).toDouble(),
-    humMax:        (m['hum_max']  as num).toDouble(),
-    humAvg:        (m['hum_avg']  as num).toDouble(),
-    hadLeak:       (m['had_leak'] as int) == 1,
-    totalReadings: m['total']     as int,
-  );
-
-  factory SensorStats.empty() => const SensorStats(
-    tempMin: 0, tempMax: 0, tempAvg: 0,
-    humMin:  0, humMax:  0, humAvg:  0,
-    hadLeak: false, totalReadings: 0,
-  );
+  Future<void> close() async => (await database).close();
 }
