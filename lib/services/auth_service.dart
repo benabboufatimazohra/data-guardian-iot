@@ -42,3 +42,4 @@ class AuthService {
   /// Déconnecte l'utilisateur courant
   void logout() => _currentUser = null;
 }
+

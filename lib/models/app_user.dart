@@ -91,3 +91,4 @@ class AppUser {
     'created_at'      : DateTime.now().toIso8601String(),
   };
 }
+

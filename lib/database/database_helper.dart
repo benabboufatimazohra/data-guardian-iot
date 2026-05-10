@@ -389,3 +389,4 @@ class DatabaseHelper {
 
   Future<void> close() async => (await database).close();
 }
+

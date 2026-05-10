@@ -160,7 +160,7 @@ class _DeviceInfoCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: _primary.withOpacity(0.1),
+                color: _primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(Icons.router, color: _primary, size: 30),
@@ -228,7 +228,7 @@ class _LiveSensorsSection extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: _primary.withOpacity(0.2),
+                  color: _primary.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: const Text(
@@ -404,7 +404,7 @@ class _BarChartPainter extends CustomPainter {
       // Opacity increases from left to right: 0.4 → 1.0
       final opacity = 0.4 + (i / (count - 1)) * 0.6;
       final paint = Paint()
-        ..color = _primary.withOpacity(opacity)
+        ..color = _primary.withValues(alpha: opacity)
         ..style = PaintingStyle.fill;
 
       final barHeight = size.height * bars[i];
@@ -468,7 +468,7 @@ class _ThresholdSection extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           _ThresholdRow(
-            iconBgColor: Colors.red.withOpacity(0.2),
+            iconBgColor: Colors.red.withValues(alpha: 0.2),
             iconColor: Colors.redAccent,
             icon: Icons.warning_amber_rounded,
             title: 'Critical Temperature',
@@ -478,7 +478,7 @@ class _ThresholdSection extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           _ThresholdRow(
-            iconBgColor: Colors.amber.withOpacity(0.2),
+            iconBgColor: Colors.amber.withValues(alpha: 0.2),
             iconColor: Colors.amber,
             icon: Icons.water_drop_outlined,
             title: 'Low Humidity Warning',

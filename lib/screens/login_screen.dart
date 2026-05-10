@@ -154,7 +154,7 @@ class _DotGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = AppColors.primary.withOpacity(0.05)
+      ..color = AppColors.primary.withValues(alpha: 0.05)
       ..style = PaintingStyle.fill;
 
     const spacing = 32.0;
@@ -263,12 +263,12 @@ class _LoginCard extends StatelessWidget {
       padding: const EdgeInsets.all(32),
       decoration: BoxDecoration(
         /// HTML: bg-white/5 backdrop-blur-xl = glassmorphism effect
-        color: Colors.white.withOpacity(0.05),
+        color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.4),
+            color: Colors.black.withValues(alpha: 0.4),
             blurRadius: 40,
             offset: const Offset(0, 20),
           ),
@@ -336,7 +336,7 @@ class _LoginCard extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 elevation: 8,
-                shadowColor: AppColors.primary.withOpacity(0.4),
+                shadowColor: AppColors.primary.withValues(alpha: 0.4),
               ),
               child: isLoading
                   ? const SizedBox(
@@ -441,7 +441,7 @@ class _InputField extends StatelessWidget {
             hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 14),
             prefixIcon: Icon(prefixIcon, color: AppColors.textMuted, size: 20),
             filled: true,
-            fillColor: Colors.black.withOpacity(0.3),
+            fillColor: Colors.black.withValues(alpha: 0.3),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
               borderSide: const BorderSide(color: AppColors.border),
@@ -516,7 +516,7 @@ class _PasswordField extends StatelessWidget {
               onPressed: onToggle,
             ),
             filled: true,
-            fillColor: Colors.black.withOpacity(0.3),
+            fillColor: Colors.black.withValues(alpha: 0.3),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
               borderSide: const BorderSide(color: AppColors.border),
@@ -570,7 +570,7 @@ class _SsoButton extends StatelessWidget {
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
         side: const BorderSide(color: AppColors.border),
-        backgroundColor: AppColors.surfaceLight.withOpacity(0.3),
+        backgroundColor: AppColors.surfaceLight.withValues(alpha: 0.3),
         padding: const EdgeInsets.symmetric(vertical: 14),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),

@@ -84,3 +84,4 @@ class SensorReading {
     recordedAt:   DateTime.parse(m['recorded_at'] as String),
   );
 }
+

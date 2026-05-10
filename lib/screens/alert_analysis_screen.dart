@@ -248,9 +248,9 @@ class _XaiReasoningBox extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _primary.withOpacity(0.05),
+        color: _primary.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _primary.withOpacity(0.2)),
+        border: Border.all(color: _primary.withValues(alpha: 0.2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -293,9 +293,9 @@ class _XaiReasoningBox extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: _bgDark.withOpacity(0.5),
+              color: _bgDark.withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: _primary.withOpacity(0.1)),
+              border: Border.all(color: _primary.withValues(alpha: 0.1)),
             ),
             child: Row(
               children: [
@@ -355,7 +355,7 @@ class _RecommendedActionSection extends StatelessWidget {
                   width: 48,
                   height: 48,
                   decoration: BoxDecoration(
-                    color: _primary.withOpacity(0.2),
+                    color: _primary.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Icon(Icons.air, color: _primary, size: 24), // closest to mode_fan
@@ -454,7 +454,7 @@ class _MapGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withOpacity(0.05)
+      ..color = Colors.white.withValues(alpha: 0.05)
       ..strokeWidth = 0.5;
     const step = 20.0;
     for (double x = 0; x < size.width; x += step) {

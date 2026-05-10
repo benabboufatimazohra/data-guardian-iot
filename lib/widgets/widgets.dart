@@ -57,7 +57,7 @@ class AppBottomNavBar extends StatelessWidget {
               break;
           }
         },
-        indicatorColor: AppColors.primary.withOpacity(0.15),
+        indicatorColor: AppColors.primary.withValues(alpha: 0.15),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         destinations: const [
           NavigationDestination(
@@ -225,7 +225,7 @@ class WaterLeakCard extends StatelessWidget {
           Container(
             width: 120, height: 120,
             decoration: BoxDecoration(
-                shape: BoxShape.circle, color: color.withOpacity(0.1)),
+                shape: BoxShape.circle, color: color.withValues(alpha: 0.1)),
             child: Icon(icon, color: color, size: 60),
           ),
           const SizedBox(height: 12),
@@ -320,7 +320,7 @@ class AlertCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border(left: BorderSide(color: _borderColor, width: 4)),
         boxShadow: [BoxShadow(
-            color: Colors.black.withOpacity(0.15),
+            color: Colors.black.withValues(alpha: 0.15),
             blurRadius: 4, offset: const Offset(0, 2))],
       ),
       padding: const EdgeInsets.all(16),
@@ -328,7 +328,7 @@ class AlertCard extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-              color: _borderColor.withOpacity(0.1),
+              color: _borderColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8)),
           child: Icon(_icon, color: _borderColor, size: 24),
         ),
@@ -440,3 +440,4 @@ class AppSpacing {
   static const double lg = 24.0;
   static const double xl = 32.0;
 }
+

@@ -109,3 +109,4 @@ class EspDevice {
     'created_at': DateTime.now().toIso8601String(),
   };
 }
+

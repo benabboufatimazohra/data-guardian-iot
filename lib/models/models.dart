@@ -302,3 +302,4 @@ enum ActivityType {
   auth,   // Connexion / déconnexion
   config, // Modification de configuration
 }
+

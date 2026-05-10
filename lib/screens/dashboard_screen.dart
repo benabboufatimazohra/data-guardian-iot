@@ -108,7 +108,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   AppBar _buildAppBar() {
     return AppBar(
-      backgroundColor: AppColors.backgroundDark.withOpacity(0.9),
+      backgroundColor: AppColors.backgroundDark.withValues(alpha: 0.9),
       elevation: 0,
       bottom: const PreferredSize(
         preferredSize: Size.fromHeight(1),
@@ -139,9 +139,9 @@ class _ConnectionBadge extends StatelessWidget {
       margin: const EdgeInsets.only(right: 16),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Container(width: 8, height: 8,
@@ -167,9 +167,9 @@ class _ErrorBanner extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.red.withOpacity(0.1),
+        color: AppColors.red.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.red.withOpacity(0.3)),
+        border: Border.all(color: AppColors.red.withValues(alpha: 0.3)),
       ),
       child: Row(children: [
         const Icon(Icons.wifi_off, color: AppColors.red, size: 18),
@@ -210,7 +210,7 @@ class _SystemStatusCard extends StatelessWidget {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft, end: Alignment.bottomRight,
-              colors: [AppColors.primary.withOpacity(0.15), Colors.transparent],
+              colors: [AppColors.primary.withValues(alpha: 0.15), Colors.transparent],
             ),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
           ),
@@ -220,7 +220,7 @@ class _SystemStatusCard extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(color: statusColor, width: 3),
-                color: statusColor.withOpacity(0.1),
+                color: statusColor.withValues(alpha: 0.1),
               ),
               child: Icon(hasAlerts ? Icons.warning_amber_rounded : Icons.check_circle,
                   color: statusColor, size: 40),
@@ -426,12 +426,12 @@ class _WaterTubePainter extends CustomPainter {
       Radius.circular(r),
     );
     canvas.drawRRect(fillRect, Paint()
-      ..color = color.withOpacity(0.8)
+      ..color = color.withValues(alpha: 0.8)
       ..style = PaintingStyle.fill);
 
     // Contour
     canvas.drawRRect(rect, Paint()
-      ..color = color.withOpacity(0.5)
+      ..color = color.withValues(alpha: 0.5)
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke);
   }
@@ -461,7 +461,7 @@ class _LiveActivityList extends StatelessWidget {
         ActivityListItem(
           icon: Icons.thermostat,
           iconColor:   tempColor,
-          iconBgColor: tempColor.withOpacity(0.1),
+          iconBgColor: tempColor.withValues(alpha: 0.1),
           title:    'Température : ${data.temperature.toStringAsFixed(1)}°C',
           subtitle: '${data.deviceId} · ${data.lastUpdatedText}',
         ),
@@ -469,7 +469,7 @@ class _LiveActivityList extends StatelessWidget {
         ActivityListItem(
           icon: Icons.water_drop_outlined,
           iconColor:   AppColors.sky,
-          iconBgColor: AppColors.sky.withOpacity(0.1),
+          iconBgColor: AppColors.sky.withValues(alpha: 0.1),
           title:    'Humidité : ${data.humidity.toStringAsFixed(0)}%',
           subtitle: '${data.deviceId} · ${data.lastUpdatedText}',
         ),
@@ -477,7 +477,7 @@ class _LiveActivityList extends StatelessWidget {
         ActivityListItem(
           icon: data.alerts.waterHigh ? Icons.water_damage : Icons.water,
           iconColor:   waterColor,
-          iconBgColor: waterColor.withOpacity(0.1),
+          iconBgColor: waterColor.withValues(alpha: 0.1),
           title:    'Niveau eau : ${data.waterLevelPercent.toStringAsFixed(0)}% (ADC: ${data.waterLevelRaw})',
           subtitle: '${data.deviceId} · ${data.lastUpdatedText}',
         ),
@@ -485,3 +485,4 @@ class _LiveActivityList extends StatelessWidget {
     );
   }
 }
+
