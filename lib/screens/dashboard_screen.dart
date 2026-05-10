@@ -297,7 +297,7 @@ class _SensorGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tempFill  = ((data.temperature - 18) / (26 - 18)).clamp(0.0, 1.0);
+    final tempFill  = ((data.temperature - 18) / (27 - 18)).clamp(0.0, 1.0);
     final humFill   = ((data.humidity - 40) / (60 - 40)).clamp(0.0, 1.0);
     final waterFill = (data.waterLevelPercent / 100.0).clamp(0.0, 1.0);
 
@@ -313,7 +313,7 @@ class _SensorGrid extends StatelessWidget {
         value: '${data.temperature.toStringAsFixed(1)}°C',
         status: data.alerts.tempCritical ? 'Critical'
             : data.alerts.tempWarning ? 'Warning' : 'Optimal',
-        rangeText: 'Range: 18°C – 26°C',
+        rangeText: 'Range: 18°C – 27°C',
         gaugeColor: tempColor,
         fillPercent: tempFill,
       ),

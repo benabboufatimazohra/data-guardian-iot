@@ -1,19 +1,12 @@
 // lib/screens/history_screen.dart
 //
-// ERREURS CORRIGÉES :
-//   1. ambiguous_import SensorReading / SensorStats
-//      → database_helper.dart contenait ces classes en double.
-//        Solution : les supprimer de database_helper.dart (voir ce fichier).
-//
-//   2. duplicate_definition (HistoryScreen, _StatsRow, etc.)
-//      → L'ancien fichier et le nouveau avaient été collés ensemble.
-//        Solution : ce fichier est la seule version, l'ancien contenu est supprimé.
-//
-//   3. return_of_invalid_type dans _normalizeTemp() / _normalizeHumid()
-//      → .map() sans type retourne List<dynamic>.
-//        Solution : .map<double>(...) force le bon type de retour.
-//
-//   4. withOpacity() déprécié → remplacé par .withValues(alpha: ...)
+// CHANGES:
+//   1. Added debug prints inside _loadData() to diagnose loading issues
+//   2. Adapted for alerts-only storage — no sensor readings in SQLite anymore
+//      The screen now shows:
+//        - Critical alerts history (from SQLite)
+//        - Live sensor values are shown on Dashboard only
+//   3. _isLoading bug fix: try/catch ensures _isLoading always becomes false
 
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
@@ -28,11 +21,10 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  int  _selectedPeriod = 0;
+  int  _selectedPeriod = 0; // 0 = 24H, 1 = 7D, 2 = 30D
   bool _isLoading      = true;
 
-  List<SensorReading> _readings = [];
-  SensorStats         _stats    = SensorStats.empty();
+  List<AlertModel> _alerts = [];
 
   @override
   void initState() {
@@ -42,33 +34,32 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
+    debugPrint('DEBUG: Starting _loadData()');
+
     final hours = [24, 168, 720][_selectedPeriod];
+    final from  = DateTime.now().subtract(Duration(hours: hours));
     const espId = 'ESP8266-01';
 
-    final readings = await DatabaseHelper.instance.getReadingsLastHours(espId, hours);
-    final stats    = await DatabaseHelper.instance.getStats(espId: espId, hoursBack: hours);
+    try {
+      final alerts = await DatabaseHelper.instance.getAlertsForExport(
+        espId: espId,
+        from:  from,
+        to:    DateTime.now(),
+      );
+      debugPrint('DEBUG: Got ${alerts.length} alerts from SQLite');
 
-    if (mounted) {
-      setState(() {
-        _readings  = readings;
-        _stats     = stats;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _alerts    = alerts;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('DEBUG: Error loading data: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
-  }
-
-  List<double> _normalizeTemp() {
-    if (_readings.isEmpty) return [0.5];
-    final vals  = _readings.reversed.map((r) => r.temperature).toList();
-    final range = (_stats.tempMax - _stats.tempMin).clamp(1.0, double.infinity);
-    return vals.map<double>((v) => ((v - _stats.tempMin) / range).clamp(0.0, 1.0)).toList();
-  }
-
-  List<double> _normalizeHumid() {
-    if (_readings.isEmpty) return [0.5];
-    final vals  = _readings.reversed.map((r) => r.humidity).toList();
-    final range = (_stats.humMax - _stats.humMin).clamp(1.0, double.infinity);
-    return vals.map<double>((v) => ((v - _stats.humMin) / range).clamp(0.0, 1.0)).toList();
   }
 
   @override
@@ -79,41 +70,32 @@ class _HistoryScreenState extends State<HistoryScreen> {
       body: Column(children: [
         _PeriodTabBar(
           selected:  _selectedPeriod,
-          onChanged: (i) { setState(() => _selectedPeriod = i); _loadData(); },
+          onChanged: (i) {
+            setState(() => _selectedPeriod = i);
+            _loadData();
+          },
         ),
         Expanded(
           child: _isLoading
-            ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-            : _readings.isEmpty
-              ? const _EmptyState()
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-                  child: Column(children: [
-                    _StatsRow(stats: _stats),
-                    const SizedBox(height: 16),
-                    _TrendChartCard(
-                      title: 'Temperature (°C)',
-                      currentValue: '${_stats.tempAvg.toStringAsFixed(1)}°C avg',
-                      minValue: '${_stats.tempMin.toStringAsFixed(1)}°C',
-                      maxValue: '${_stats.tempMax.toStringAsFixed(1)}°C',
-                      chartColor: AppColors.primary,
-                      dataPoints: _normalizeTemp(),
-                      totalReadings: _stats.totalReadings,
+              ? const Center(
+                  child: CircularProgressIndicator(color: AppColors.primary))
+              : _alerts.isEmpty
+                  ? const _EmptyState()
+                  : RefreshIndicator(
+                      onRefresh: _loadData,
+                      color: AppColors.primary,
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+                        children: [
+                          _SummaryCard(alerts: _alerts),
+                          const SizedBox(height: 16),
+                          ..._alerts.reversed.map((alert) => Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _AlertHistoryCard(alert: alert),
+                          )),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 16),
-                    _TrendChartCard(
-                      title: 'Humidity (%)',
-                      currentValue: '${_stats.humAvg.toStringAsFixed(0)}% avg',
-                      minValue: '${_stats.humMin.toStringAsFixed(0)}%',
-                      maxValue: '${_stats.humMax.toStringAsFixed(0)}%',
-                      chartColor: AppColors.sky,
-                      dataPoints: _normalizeHumid(),
-                      totalReadings: _stats.totalReadings,
-                    ),
-                    const SizedBox(height: 16),
-                    _LeakHistoryCard(readings: _readings),
-                  ]),
-                ),
         ),
       ]),
       bottomNavigationBar: AppBottomNavBar(currentIndex: 1, onTap: (_) {}),
@@ -127,20 +109,30 @@ class _HistoryScreenState extends State<HistoryScreen> {
       icon: const Icon(Icons.arrow_back, color: AppColors.textSecondary),
       onPressed: () => Navigator.pop(context),
     ),
-    title: const Text('History & Analytics',
-        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+    title: const Text(
+      'Alert History',
+      style: TextStyle(
+          fontSize: 17,
+          fontWeight: FontWeight.w700,
+          color: AppColors.textPrimary),
+    ),
     actions: [
       Container(
         margin: const EdgeInsets.only(right: 16),
         child: TextButton.icon(
           style: TextButton.styleFrom(
             backgroundColor: AppColors.surface,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8)),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           ),
-          icon: const Icon(Icons.storage_outlined, color: AppColors.textPrimary, size: 14),
-          label: Text('${_stats.totalReadings} records',
-              style: const TextStyle(color: AppColors.textPrimary, fontSize: 13)),
+          icon: const Icon(Icons.notifications_active_outlined,
+              color: AppColors.textPrimary, size: 14),
+          label: Text(
+            '${_alerts.length} alerts',
+            style: const TextStyle(
+                color: AppColors.textPrimary, fontSize: 13),
+          ),
           onPressed: null,
         ),
       ),
@@ -152,36 +144,53 @@ class _HistoryScreenState extends State<HistoryScreen> {
   );
 }
 
-// ─── Stats summary row ────────────────────────────────────────────────────────
-class _StatsRow extends StatelessWidget {
-  final SensorStats stats;
-  const _StatsRow({required this.stats});
+// ─── Summary card at top ──────────────────────────────────────────────────────
+class _SummaryCard extends StatelessWidget {
+  final List<AlertModel> alerts;
+  const _SummaryCard({required this.alerts});
+
   @override
-  Widget build(BuildContext context) => Row(children: [
-    Expanded(child: _StatChip(
-      label: 'Temp Max',
-      value: '${stats.tempMax.toStringAsFixed(1)}°C',
-      color: stats.tempMax > 35 ? AppColors.red : AppColors.primary,
-    )),
-    const SizedBox(width: 8),
-    Expanded(child: _StatChip(
-      label: 'Hum Avg',
-      value: '${stats.humAvg.toStringAsFixed(0)}%',
-      color: AppColors.sky,
-    )),
-    const SizedBox(width: 8),
-    Expanded(child: _StatChip(
-      label: 'Leaks',
-      value: stats.hadLeak ? 'YES' : 'None',
-      color: stats.hadLeak ? AppColors.red : AppColors.emerald,
-    )),
-  ]);
+  Widget build(BuildContext context) {
+    final critical  = alerts.where((a) => a.severity == AlertSeverity.critical).length;
+    final resolved  = alerts.where((a) => a.isResolved).length;
+    final unresolved = alerts.where((a) => !a.isResolved).length;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Summary',
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textSecondary,
+                letterSpacing: 1.2)),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: _StatChip(
+              label: 'Critical', value: '$critical', color: AppColors.red)),
+          const SizedBox(width: 8),
+          Expanded(child: _StatChip(
+              label: 'Unresolved', value: '$unresolved', color: AppColors.orange)),
+          const SizedBox(width: 8),
+          Expanded(child: _StatChip(
+              label: 'Resolved', value: '$resolved', color: AppColors.emerald)),
+        ]),
+      ]),
+    );
+  }
 }
 
 class _StatChip extends StatelessWidget {
   final String label, value;
   final Color  color;
-  const _StatChip({required this.label, required this.value, required this.color});
+  const _StatChip(
+      {required this.label, required this.value, required this.color});
+
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
@@ -191,117 +200,97 @@ class _StatChip extends StatelessWidget {
       border: Border.all(color: color.withValues(alpha: 0.3)),
     ),
     child: Column(children: [
-      Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: color)),
+      Text(value,
+          style: TextStyle(
+              fontSize: 20, fontWeight: FontWeight.w700, color: color)),
       const SizedBox(height: 2),
-      Text(label, style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+      Text(label,
+          style: const TextStyle(
+              fontSize: 10, color: AppColors.textSecondary)),
     ]),
   );
 }
 
-// ─── Trend chart card ─────────────────────────────────────────────────────────
-class _TrendChartCard extends StatelessWidget {
-  final String title, currentValue, minValue, maxValue;
-  final Color chartColor;
-  final List<double> dataPoints;
-  final int totalReadings;
-  const _TrendChartCard({
-    required this.title, required this.currentValue,
-    required this.minValue, required this.maxValue,
-    required this.chartColor, required this.dataPoints,
-    required this.totalReadings,
-  });
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(20),
-    decoration: BoxDecoration(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: AppColors.border),
-    ),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(title, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-        Row(children: [
-          _MiniChip('min $minValue', AppColors.textMuted),
-          const SizedBox(width: 6),
-          _MiniChip('max $maxValue', chartColor),
-        ]),
-      ]),
-      const SizedBox(height: 4),
-      Text(currentValue, style: const TextStyle(
-          fontSize: 28, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-      const SizedBox(height: 16),
-      SizedBox(height: 120, child: CustomPaint(
-        painter: _AreaChartPainter(points: dataPoints, color: chartColor),
-        size: Size.infinite,
-      )),
-      const SizedBox(height: 8),
-      Text('Based on $totalReadings readings',
-          style: const TextStyle(fontSize: 10, color: AppColors.textMuted)),
-    ]),
-  );
-}
+// ─── Single alert history card ────────────────────────────────────────────────
+class _AlertHistoryCard extends StatelessWidget {
+  final AlertModel alert;
+  const _AlertHistoryCard({required this.alert});
 
-class _MiniChip extends StatelessWidget {
-  final String text;
-  final Color  color;
-  const _MiniChip(this.text, this.color);
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.1),
-      borderRadius: BorderRadius.circular(6)),
-    child: Text(text, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color)),
-  );
-}
+  Color get _severityColor {
+    switch (alert.severity) {
+      case AlertSeverity.critical: return AppColors.red;
+      case AlertSeverity.warning:  return AppColors.orange;
+      case AlertSeverity.info:     return AppColors.primary;
+    }
+  }
 
-// ─── Leak history card ────────────────────────────────────────────────────────
-class _LeakHistoryCard extends StatelessWidget {
-  final List<SensorReading> readings;
-  const _LeakHistoryCard({required this.readings});
   @override
   Widget build(BuildContext context) {
-    final leakEvents = readings.where((r) => r.waterLeak).toList();
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(10),
+        border: Border(left: BorderSide(color: _severityColor, width: 3)),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          const Icon(Icons.water_damage, color: AppColors.sky, size: 18),
-          const SizedBox(width: 8),
-          const Text('Water Leak Events',
-              style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-          const Spacer(),
-          _MiniChip('${leakEvents.length} events',
-              leakEvents.isEmpty ? AppColors.emerald : AppColors.red),
-        ]),
-        const SizedBox(height: 12),
-        if (leakEvents.isEmpty)
-          const Text('No leak events recorded.',
-              style: TextStyle(fontSize: 13, color: AppColors.textMuted))
-        else
-          ...leakEvents.take(5).map((r) => Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(children: [
-              const Icon(Icons.warning_amber_rounded, color: AppColors.red, size: 16),
-              const SizedBox(width: 8),
+      child: Row(children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: _severityColor.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            alert.severity == AlertSeverity.critical
+                ? Icons.warning_amber_rounded
+                : Icons.info_outline,
+            color: _severityColor,
+            size: 20,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(alert.title,
+                style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+            const SizedBox(height: 4),
+            Row(children: [
+              Text(alert.location,
+                  style: const TextStyle(
+                      fontSize: 11, color: AppColors.textSecondary)),
+              const Text(' • ',
+                  style: TextStyle(color: AppColors.textMuted)),
               Text(
-                '${r.recordedAt.month}/${r.recordedAt.day} '
-                '${r.recordedAt.hour.toString().padLeft(2, '0')}:'
-                '${r.recordedAt.minute.toString().padLeft(2, '0')}',
-                style: const TextStyle(fontSize: 12, color: AppColors.textPrimary),
+                '${alert.timestamp.day}/${alert.timestamp.month} '
+                '${alert.timestamp.hour.toString().padLeft(2, '0')}:'
+                '${alert.timestamp.minute.toString().padLeft(2, '0')}',
+                style: const TextStyle(
+                    fontSize: 11, color: AppColors.textSecondary),
               ),
-              const Spacer(),
-              Text('${r.waterPercent.toStringAsFixed(0)}%',
-                  style: const TextStyle(fontSize: 12, color: AppColors.red,
-                      fontWeight: FontWeight.w600)),
             ]),
-          )),
+          ],
+        )),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: alert.isResolved
+                ? AppColors.emerald.withValues(alpha: 0.1)
+                : AppColors.red.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            alert.isResolved ? 'Resolved' : 'Active',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: alert.isResolved ? AppColors.emerald : AppColors.red,
+            ),
+          ),
+        ),
       ]),
     );
   }
@@ -310,15 +299,21 @@ class _LeakHistoryCard extends StatelessWidget {
 // ─── Empty state ──────────────────────────────────────────────────────────────
 class _EmptyState extends StatelessWidget {
   const _EmptyState();
+
   @override
   Widget build(BuildContext context) => const Center(
     child: Column(mainAxisSize: MainAxisSize.min, children: [
-      Icon(Icons.storage_outlined, color: AppColors.textMuted, size: 48),
+      Icon(Icons.notifications_none_outlined,
+          color: AppColors.textMuted, size: 56),
       SizedBox(height: 12),
-      Text('No data yet', style: TextStyle(
-          fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+      Text('No critical alerts yet',
+          style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary)),
       SizedBox(height: 4),
-      Text('Data will appear once the ESP is connected',
+      Text('Alerts appear here when the ESP\ndetects critical conditions',
+          textAlign: TextAlign.center,
           style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
     ]),
   );
@@ -329,6 +324,7 @@ class _PeriodTabBar extends StatelessWidget {
   final int selected;
   final ValueChanged<int> onChanged;
   const _PeriodTabBar({required this.selected, required this.onChanged});
+
   @override
   Widget build(BuildContext context) {
     const tabs = ['24H', '7D', '30D'];
@@ -343,56 +339,22 @@ class _PeriodTabBar extends StatelessWidget {
           onTap: () => onChanged(i),
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 14),
-            decoration: BoxDecoration(border: Border(bottom: BorderSide(
-              color: sel ? AppColors.primary : Colors.transparent, width: 2))),
-            child: Text(tabs[i], textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-                  color: sel ? AppColors.primary : AppColors.textSecondary)),
+            decoration: BoxDecoration(
+                border: Border(
+                    bottom: BorderSide(
+                        color: sel ? AppColors.primary : Colors.transparent,
+                        width: 2))),
+            child: Text(
+              tabs[i],
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: sel ? AppColors.primary : AppColors.textSecondary),
+            ),
           ),
         ));
       })),
     );
   }
-}
-
-// ─── Area chart painter ───────────────────────────────────────────────────────
-class _AreaChartPainter extends CustomPainter {
-  final List<double> points;
-  final Color        color;
-  const _AreaChartPainter({required this.points, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (points.length < 2) return;
-    final n      = points.length;
-    final coords = List.generate(n, (i) => Offset(
-      size.width * i / (n - 1),
-      size.height * (1 - points[i]),
-    ));
-    final linePath = Path()..moveTo(coords[0].dx, coords[0].dy);
-    for (int i = 1; i < n; i++) {
-      final cpX = (coords[i - 1].dx + coords[i].dx) / 2;
-      linePath.cubicTo(cpX, coords[i - 1].dy, cpX, coords[i].dy,
-          coords[i].dx, coords[i].dy);
-    }
-    final fillPath = Path()
-      ..addPath(linePath, Offset.zero)
-      ..lineTo(coords.last.dx, size.height)
-      ..lineTo(coords.first.dx, size.height)
-      ..close();
-    canvas.drawPath(fillPath, Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter, end: Alignment.bottomCenter,
-        colors: [color.withValues(alpha: 0.3), color.withValues(alpha: 0.0)],
-      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height))
-      ..style = PaintingStyle.fill);
-    canvas.drawPath(linePath, Paint()
-      ..color = color ..strokeWidth = 2.5
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round ..strokeJoin = StrokeJoin.round);
-  }
-
-  @override
-  bool shouldRepaint(_AreaChartPainter old) =>
-      old.points != points || old.color != color;
 }

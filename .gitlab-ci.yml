@@ -1,0 +1,31 @@
+# .gitlab-ci.yml
+# DataGuardian IoT — Flutter CI/CD Pipeline
+
+image: ghcr.io/cirruslabs/flutter:stable
+
+stages:
+  - validate
+  - build
+
+# ── Stage 1: Code Quality ──────────────────────────────────────────
+flutter_analyze:
+  stage: validate
+  script:
+    - flutter pub get
+    - flutter analyze
+  only:
+    - main
+    - merge_requests
+
+# ── Stage 2: Build APK ────────────────────────────────────────────
+flutter_build:
+  stage: build
+  script:
+    - flutter pub get
+    - flutter build apk --release --no-tree-shake-icons
+  artifacts:
+    paths:
+      - build/app/outputs/flutter-apk/app-release.apk
+    expire_in: 7 days
+  only:
+    - main

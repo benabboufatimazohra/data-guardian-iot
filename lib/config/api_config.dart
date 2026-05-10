@@ -18,8 +18,8 @@ class ApiConfig {
   static const String espIpAddress = '192.168.1.104';
   static const int    espPort      = 80;
 
-  /// Délai entre chaque poll (5 secondes pour les données en temps réel)
-  static const Duration pollingInterval = Duration(seconds: 5);
+  /// Délai entre chaque poll (2 min pour les données en temps réel)
+  static const Duration pollingInterval = Duration(minutes: 2); 
 
   /// Timeout d'une requête HTTP (si l'ESP ne répond pas)
   static const Duration requestTimeout = Duration(seconds: 3);

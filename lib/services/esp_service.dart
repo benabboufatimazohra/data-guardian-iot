@@ -1,5 +1,8 @@
 // lib/services/esp_service.dart
-// Updated: now auto-saves every reading + alerts to SQLite
+//
+// CHANGED: No longer saves every sensor reading to SQLite.
+//          Only saves CRITICAL alerts to save storage space.
+//          Regular polling still works and streams data to the UI.
 
 import 'dart:async';
 import 'dart:convert';
@@ -56,15 +59,19 @@ class EspService {
         final data = EnvironmentData.fromJson(json);
         _lastData = data;
         _setConnected(true);
+
+        // ── Send to UI via stream ────────────────────────────────────────
         _dataController.add(data);
 
-        // ── Auto-save to SQLite ──────────────────────────────────────────
-        await DatabaseHelper.instance.insertReading(data);
-
-        // Save any live alerts triggered by this reading
+        // ── Save ONLY critical alerts to SQLite (saves storage space) ────
+        // We do NOT save sensor readings anymore.
+        // We only save alerts that are critical severity.
         final liveAlerts = AlertModel.fromEspData(data);
         for (final alert in liveAlerts) {
-          await DatabaseHelper.instance.insertAlert(alert);
+          if (alert.severity == AlertSeverity.critical) {
+            await DatabaseHelper.instance.insertAlert(alert, espId: data.deviceId);
+          }
+          // Warning and info alerts are shown in UI but NOT stored
         }
         // ─────────────────────────────────────────────────────────────────
 
@@ -76,7 +83,8 @@ class EspService {
       }
     } on TimeoutException {
       _setConnected(false);
-      _errorController.add('Timeout — ESP not responding (${ApiConfig.espIpAddress})');
+      _errorController
+          .add('Timeout — ESP not responding (${ApiConfig.espIpAddress})');
       return null;
     } catch (e) {
       _setConnected(false);
