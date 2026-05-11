@@ -237,7 +237,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
             onPressed: () async {
               if (nameCtrl.text.isEmpty || emailCtrl.text.isEmpty ||
-                  passCtrl.text.isEmpty) return;
+                  passCtrl.text.isEmpty) {
+                return;
+              }
               await DatabaseHelper.instance.createUser(
                 AppUser(
                   fullName:      nameCtrl.text,
@@ -491,7 +493,7 @@ class _UserRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final espName = user.assignedEspId != null
-        ? _esps_name(user.assignedEspId!)
+        ? _espName(user.assignedEspId!)
         : null;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -535,7 +537,7 @@ class _UserRow extends StatelessWidget {
   }
 
   // Retrouve le nom de l'ESP depuis son id
-  String? _esps_name(String espId) {
+  String? _espName(String espId) {
     try {
       return esps.firstWhere((e) => e.id == espId).name;
     } catch (_) {

@@ -2,7 +2,6 @@
 // Version finale — affiche température, humidité + niveau d'eau en temps réel
 
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../models/models.dart';

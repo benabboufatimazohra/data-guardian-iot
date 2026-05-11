@@ -1,10 +1,8 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 // ─── App Colors (inline for self-contained file) ────────────────────────────
 const _bgDark = Color(0xFF101722);
 const _surface = Color(0xFF1A2332);
-const _surfaceLight = Color(0xFF222D3D);
 const _border = Color(0xFF2A3547);
 const _primary = Color(0xFF3C83F6);
 const _emerald = Color(0xFF10B981);
@@ -544,10 +542,9 @@ class _ThresholdRow extends StatelessWidget {
             Switch(
               value: isEnabled,
               onChanged: onChanged,
-              activeColor: Colors.white,
-              activeTrackColor: _primary,
-              inactiveThumbColor: Colors.white,
-              inactiveTrackColor: _textMuted,
+              thumbColor: WidgetStateProperty.all(Colors.white),
+              trackColor: WidgetStateProperty.resolveWith((states) =>
+                states.contains(WidgetState.selected) ? _primary : _textMuted),
             ),
           ],
         ),

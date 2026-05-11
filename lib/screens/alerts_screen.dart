@@ -29,11 +29,13 @@ import '../widgets/widgets.dart';
 ///
 /// 2. AlertCard receives a callback (onDismiss) that removes the alert from
 ///    the list. This is like event delegation in JavaScript:
-///    HTML: element.addEventListener('click', handler)
+///    ```javascript
+///    DOM code: element.addEventListener('click', handler)
 ///    Flutter: onPressed: () { setState(() { _alerts.remove(alert); }); }
+///    ```
 ///
 /// 3. WHERE API CALL GOES: initState() calls _fetchAlerts().
-///    The API returns a JSON array, which gets parsed into List<AlertModel>.
+///    The API returns a JSON array, which gets parsed into `List<AlertModel>`.
 ///    setState updates the list and Flutter re-renders the ListView.
 /// ─────────────────────────────────────────────────────────────────────────────
 class AlertsScreen extends StatefulWidget {
@@ -48,7 +50,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
   bool _isLoading = false;
 
   /// STATE: The alerts list. API data goes here.
-  List<AlertModel> _allAlerts = [
+  final List<AlertModel> _allAlerts = [
     AlertModel(
       id: '1',
       severity: AlertSeverity.critical,
