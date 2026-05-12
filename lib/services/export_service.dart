@@ -70,6 +70,13 @@ class ExportService {
   ExportService._();
   static final ExportService instance = ExportService._();
 
+  CellValue _wrapCellValue(Object? value) {
+    if (value == null) return TextCellValue('');
+    if (value is int) return IntCellValue(value);
+    if (value is double) return DoubleCellValue(value);
+    return TextCellValue(value.toString());
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // EXCEL EXPORT — compatible with excel v2.1.0
   // ═══════════════════════════════════════════════════════════════════════════
@@ -96,12 +103,11 @@ class ExportService {
     for (int c = 0; c < alertHeaders.length; c++) {
       final cell = alertSheet.cell(
           CellIndex.indexByColumnRow(columnIndex: c, rowIndex: 0));
-      cell.value = alertHeaders[c]; // ← v2 API: assign directly
+      cell.value = _wrapCellValue(alertHeaders[c]);
       cell.cellStyle = CellStyle(
         bold: true,
-        backgroundColorHex: '#1E3A5F',
-        fontColorHex: '#FFFFFF',
-        horizontalAlign: HorizontalAlign.Center,
+        backgroundColorHex: ExcelColor.fromHexString('#1E3A5F'),
+        fontColorHex: ExcelColor.fromHexString('#FFFFFF'),
       );
     }
 
@@ -122,12 +128,12 @@ class ExportService {
       for (int c = 0; c < rowData.length; c++) {
         final cell = alertSheet.cell(
             CellIndex.indexByColumnRow(columnIndex: c, rowIndex: row));
-        cell.value = rowData[c]; // ← v2: works with String, int, double
+        cell.value = _wrapCellValue(rowData[c]);
         if (a.severity == AlertSeverity.critical && !a.isResolved) {
-          cell.cellStyle = CellStyle(fontColorHex: '#CC0000');
+          cell.cellStyle = CellStyle(fontColorHex: ExcelColor.fromHexString('#CC0000'));
         }
         if (row % 2 == 0) {
-          cell.cellStyle = CellStyle(backgroundColorHex: '#F0F4FF');
+          cell.cellStyle = CellStyle(backgroundColorHex: ExcelColor.fromHexString('#F0F4FF'));
         }
       }
     }
@@ -139,10 +145,10 @@ class ExportService {
       final rowIdx = summarySheet.maxRows;
       summarySheet.cell(
         CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIdx),
-      ).value = label;
+      ).value = _wrapCellValue(label);
       summarySheet.cell(
         CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: rowIdx),
-      ).value = value;
+      ).value = _wrapCellValue(value);
     }
 
     addRow('Report',       'DataGuardian IoT Export');
@@ -330,10 +336,12 @@ class ExportService {
   // SHARE
   // ═══════════════════════════════════════════════════════════════════════════
   Future<void> shareFile(File file, String subject) async {
-    await Share.shareXFiles(
-      [XFile(file.path)],
-      subject: subject,
-      text: 'DataGuardian IoT Export — $subject',
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(file.path)],
+        subject: subject,
+        text: 'DataGuardian IoT Export — $subject',
+      ),
     );
   }
 
