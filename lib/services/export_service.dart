@@ -70,11 +70,11 @@ class ExportService {
   ExportService._();
   static final ExportService instance = ExportService._();
 
-  CellValue _wrapCellValue(Object? value) {
-    if (value == null) return TextCellValue('');
-    if (value is int) return IntCellValue(value);
-    if (value is double) return DoubleCellValue(value);
-    return TextCellValue(value.toString());
+  dynamic _wrapCellValue(Object? value) {
+    if (value == null) return '';
+    if (value is int) return value;
+    if (value is double) return value;
+    return value.toString();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -106,8 +106,8 @@ class ExportService {
       cell.value = _wrapCellValue(alertHeaders[c]);
       cell.cellStyle = CellStyle(
         bold: true,
-        backgroundColorHex: ExcelColor.fromHexString('#1E3A5F'),
-        fontColorHex: ExcelColor.fromHexString('#FFFFFF'),
+        backgroundColorHex: '#1E3A5F',
+        fontColorHex: '#FFFFFF',
       );
     }
 
@@ -130,10 +130,10 @@ class ExportService {
             CellIndex.indexByColumnRow(columnIndex: c, rowIndex: row));
         cell.value = _wrapCellValue(rowData[c]);
         if (a.severity == AlertSeverity.critical && !a.isResolved) {
-          cell.cellStyle = CellStyle(fontColorHex: ExcelColor.fromHexString('#CC0000'));
+          cell.cellStyle = CellStyle(fontColorHex: '#CC0000');
         }
         if (row % 2 == 0) {
-          cell.cellStyle = CellStyle(backgroundColorHex: ExcelColor.fromHexString('#F0F4FF'));
+          cell.cellStyle = CellStyle(backgroundColorHex: '#F0F4FF');
         }
       }
     }
@@ -336,12 +336,10 @@ class ExportService {
   // SHARE
   // ═══════════════════════════════════════════════════════════════════════════
   Future<void> shareFile(File file, String subject) async {
-    await SharePlus.instance.share(
-      ShareParams(
-        files: [XFile(file.path)],
-        subject: subject,
-        text: 'DataGuardian IoT Export — $subject',
-      ),
+    await Share.shareXFiles(
+      [XFile(file.path)],
+      subject: subject,
+      text: 'DataGuardian IoT Export — $subject',
     );
   }
 

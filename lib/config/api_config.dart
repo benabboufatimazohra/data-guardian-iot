@@ -15,7 +15,7 @@ class ApiConfig {
   ApiConfig._();
 
   /// ⚠️  CHANGEZ CETTE VALEUR avec l'IP affichée dans le Serial Monitor
-  static const String espIpAddress = '192.168.11.174';
+  static const String espIpAddress = '10.106.196.174';
   static const int    espPort      = 80;
 
   /// Délai entre chaque poll (2 min pour les données en temps réel)
