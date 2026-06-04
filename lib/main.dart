@@ -1,25 +1,32 @@
 // lib/main.dart
 //
-// ERREURS CORRIGÉES :
-//   1. undefined_method 'ExportScreen'
-//      → ExportScreen n'était pas importé.
-//        Solution : ajouter l'import de export_screen.dart.
-//
-//   2. deprecated_member_use 'withOpacity'
-//      → withOpacity() est déprécié depuis Flutter 3.x.
-//        Solution : remplacé par .withValues(alpha: 0.15).
+// CHANGES:
+//   1. main() is now async — loads SharedPreferences (ApiConfig.load()) and
+//      initialises flutter_local_notifications before runApp().
+//   2. Imports ExportScreen (was missing in the original).
 
 import 'package:flutter/material.dart';
-import 'package:data_monitoring_app/screens/login_screen.dart';
-import 'package:data_monitoring_app/screens/dashboard_screen.dart';
-import 'package:data_monitoring_app/screens/alerts_screen.dart';
-import 'package:data_monitoring_app/screens/device_detail_screen.dart';
-import 'package:data_monitoring_app/screens/history_screen.dart';
-import 'package:data_monitoring_app/screens/alert_analysis_screen.dart';
-import 'package:data_monitoring_app/screens/settings_screen.dart';
-import 'package:data_monitoring_app/screens/export_screen.dart'; // ← AJOUTÉ
+import 'package:data_guardian/screens/login_screen.dart';
+import 'package:data_guardian/screens/dashboard_screen.dart';
+import 'package:data_guardian/screens/alerts_screen.dart';
+import 'package:data_guardian/screens/device_detail_screen.dart';
+import 'package:data_guardian/screens/history_screen.dart';
+import 'package:data_guardian/screens/alert_analysis_screen.dart';
+import 'package:data_guardian/screens/settings_screen.dart';
+import 'package:data_guardian/screens/export_screen.dart';
+import 'package:data_guardian/config/api_config.dart';
+import 'package:data_guardian/services/notification_service.dart';
 
-void main() {
+Future<void> main() async {
+  // Required before any async work in main()
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Load saved ESP URL from SharedPreferences
+  await ApiConfig.load();
+
+  // Initialise notification plugin (requests permissions on Android 13+)
+  await NotificationService.instance.init();
+
   runApp(const DataGuardianApp());
 }
 
@@ -42,7 +49,6 @@ class DataGuardianApp extends StatelessWidget {
         ),
         navigationBarTheme: NavigationBarThemeData(
           backgroundColor: const Color(0xFF1A2332),
-          // withValues(alpha:) remplace withOpacity() déprécié
           indicatorColor: const Color(0xFF3C83F6).withValues(alpha: 0.15),
         ),
         appBarTheme: const AppBarTheme(
@@ -66,7 +72,7 @@ class DataGuardianApp extends StatelessWidget {
         '/device-detail':  (ctx) => const DeviceDetailScreen(),
         '/history':        (ctx) => const HistoryScreen(),
         '/settings':       (ctx) => const SettingsScreen(),
-        '/export':         (ctx) => const ExportScreen(), // ← const ajouté
+        '/export':         (ctx) => const ExportScreen(),
       },
       onUnknownRoute: (settings) => MaterialPageRoute(
         builder: (_) => Scaffold(
@@ -76,4 +82,3 @@ class DataGuardianApp extends StatelessWidget {
     );
   }
 }
-

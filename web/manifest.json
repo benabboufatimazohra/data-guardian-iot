@@ -1,6 +1,6 @@
 {
-    "name": "data_monitoring_app",
-    "short_name": "data_monitoring_app",
+    "name": "data_guardian",
+    "short_name": "data_guardian",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

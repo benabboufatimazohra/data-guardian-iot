@@ -1,43 +1,18 @@
+// lib/screens/alerts_screen.dart
+//
+// ISSUE 1 FIX: "Dismiss" on AlertCard removes alert from local UI list only.
+//   It does NOT call DatabaseHelper.resolveAlert() — resolution is automatic
+//   when sensor values return to normal (handled by AlertService).
+//
+// ISSUE 2 FIX: _ExplainBottomSheet now receives a XaiData object and displays
+//   the real ESP-generated explanation. No hardcoded text remains.
+
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../models/models.dart';
 import '../widgets/widgets.dart';
+import '../services/esp_service.dart';
 
-/// ─────────────────────────────────────────────────────────────────────────────
-/// SCREEN 3: AlertsScreen
-/// ─────────────────────────────────────────────────────────────────────────────
-///
-/// WIDGET TREE:
-/// Scaffold
-/// ├── AppBar  ← "System Alerts" + blinking notification bell
-/// ├── body: Column
-/// │   ├── _FilterTabBar        ← All / Critical / Warning / Resolved tabs
-/// │   └── Expanded
-/// │       └── ListView
-/// │           ├── _SectionLabel "Critical Priority"
-/// │           ├── AlertCard (critical)
-/// │           ├── _SectionLabel "Warning Status"
-/// │           ├── AlertCard (warning)
-/// │           ├── _SectionLabel "Earlier Today"
-/// │           └── _ResolvedCard
-/// └── bottomNavigationBar: AppBottomNavBar (Alerts tab active)
-///
-/// KEY CONCEPTS IN THIS SCREEN:
-///
-/// 1. Filter tabs — we track which tab is selected with an int _selectedTab.
-///    setState() re-filters the alert list when a tab changes.
-///
-/// 2. AlertCard receives a callback (onDismiss) that removes the alert from
-///    the list. This is like event delegation in JavaScript:
-///    ```javascript
-///    DOM code: element.addEventListener('click', handler)
-///    Flutter: onPressed: () { setState(() { _alerts.remove(alert); }); }
-///    ```
-///
-/// 3. WHERE API CALL GOES: initState() calls _fetchAlerts().
-///    The API returns a JSON array, which gets parsed into `List<AlertModel>`.
-///    setState updates the list and Flutter re-renders the ListView.
-/// ─────────────────────────────────────────────────────────────────────────────
 class AlertsScreen extends StatefulWidget {
   const AlertsScreen({super.key});
 
@@ -46,44 +21,42 @@ class AlertsScreen extends StatefulWidget {
 }
 
 class _AlertsScreenState extends State<AlertsScreen> {
-  int _selectedTab = 0; // 0=All, 1=Critical, 2=Warning, 3=Resolved
-  bool _isLoading = false;
+  int  _selectedTab = 0;
+  bool _isLoading   = false;
 
-  /// STATE: The alerts list. API data goes here.
   final List<AlertModel> _allAlerts = [
     AlertModel(
-      id: '1',
-      severity: AlertSeverity.critical,
-      title: 'High Temperature Detected - 35.2°C',
-      deviceId: 'ESP8266-01',
-      location: 'Rack A-04',
+      id:        '1',
+      severity:  AlertSeverity.critical,
+      title:     'High Temperature Detected - 35.2°C',
+      deviceId:  'ESP8266-01',
+      location:  'Rack A-04',
       timestamp: DateTime.now().subtract(const Duration(minutes: 2)),
     ),
     AlertModel(
-      id: '2',
-      severity: AlertSeverity.warning,
-      title: 'Humidity Threshold Near',
-      deviceId: 'ESP8266-04',
-      location: 'Rack C-12',
+      id:        '2',
+      severity:  AlertSeverity.warning,
+      title:     'Humidity Threshold Near',
+      deviceId:  'ESP8266-04',
+      location:  'Rack C-12',
       timestamp: DateTime.now().subtract(const Duration(minutes: 15)),
     ),
     AlertModel(
-      id: '3',
-      severity: AlertSeverity.info,
-      title: 'Network Latency Spike Resolved',
-      deviceId: 'Gateway-02',
-      location: 'Node Gateway-02',
+      id:        '3',
+      severity:  AlertSeverity.info,
+      title:     'Network Latency Spike Resolved',
+      deviceId:  'Gateway-02',
+      location:  'Node Gateway-02',
       timestamp: DateTime.now().subtract(const Duration(hours: 2)),
       isResolved: true,
     ),
   ];
 
-  /// Filtered list based on selected tab
   List<AlertModel> get _filteredAlerts {
     switch (_selectedTab) {
-      case 1: return _allAlerts.where((a) => a.severity == AlertSeverity.critical).toList();
-      case 2: return _allAlerts.where((a) => a.severity == AlertSeverity.warning).toList();
-      case 3: return _allAlerts.where((a) => a.isResolved).toList();
+      case 1:  return _allAlerts.where((a) => a.severity == AlertSeverity.critical).toList();
+      case 2:  return _allAlerts.where((a) => a.severity == AlertSeverity.warning).toList();
+      case 3:  return _allAlerts.where((a) => a.isResolved).toList();
       default: return _allAlerts;
     }
   }
@@ -94,53 +67,43 @@ class _AlertsScreenState extends State<AlertsScreen> {
     _fetchAlerts();
   }
 
-  /// API CALL: Fetch alerts from your backend
   Future<void> _fetchAlerts() async {
     setState(() => _isLoading = true);
-
-    // ─── API call goes here ─────────────────────────────────────────────
-    // final response = await http.get(
-    //   Uri.parse('https://your-api.com/api/v1/alerts'),
-    //   headers: {'Authorization': 'Bearer $token'},
-    // );
-    //
-    // if (response.statusCode == 200) {
-    //   final List<dynamic> jsonList = jsonDecode(response.body);
-    //   setState(() {
-    //     _allAlerts = jsonList.map((j) => AlertModel.fromJson(j)).toList();
-    //   });
-    // }
-    // ───────────────────────────────────────────────────────────────────
-
     await Future.delayed(const Duration(milliseconds: 300));
     setState(() => _isLoading = false);
   }
 
-  /// Dismiss an alert — removes it from the list
-  /// In production: also call DELETE /api/v1/alerts/{id}
+  // ── Dismiss removes from local UI list only ───────────────────────────────
+  // Does NOT resolve the alert in SQLite.
+  // The alert will remain active in the DB until the sensor returns to normal.
   void _dismissAlert(String alertId) {
-    setState(() {
-      _allAlerts.removeWhere((a) => a.id == alertId);
-    });
+    setState(() => _allAlerts.removeWhere((a) => a.id == alertId));
   }
 
-  /// Show AI explanation for an alert (placeholder for your LLM integration)
+  // ── Explain: fetch latest XAI from EspService and show bottom sheet ────────
   void _explainAlert(AlertModel alert) {
+    // Get the most recent XAI data received from the ESP
+    final xai = EspService.instance.lastXai;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.surface,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => _ExplainBottomSheet(alert: alert),
+      builder: (_) => _ExplainBottomSheet(alert: alert, xai: xai),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final criticalAlerts = _filteredAlerts.where((a) => a.severity == AlertSeverity.critical && !a.isResolved).toList();
-    final warningAlerts = _filteredAlerts.where((a) => a.severity == AlertSeverity.warning && !a.isResolved).toList();
-    final resolvedAlerts = _filteredAlerts.where((a) => a.isResolved).toList();
+    final criticalAlerts =
+        _filteredAlerts.where((a) => a.severity == AlertSeverity.critical && !a.isResolved).toList();
+    final warningAlerts =
+        _filteredAlerts.where((a) => a.severity == AlertSeverity.warning && !a.isResolved).toList();
+    final resolvedAlerts =
+        _filteredAlerts.where((a) => a.isResolved).toList();
 
     return Scaffold(
       backgroundColor: AppColors.backgroundDark,
@@ -151,16 +114,13 @@ class _AlertsScreenState extends State<AlertsScreen> {
           preferredSize: Size.fromHeight(1),
           child: Divider(color: AppColors.border, height: 1),
         ),
-        title: Row(
-          children: [
-            const Icon(Icons.sensors, color: AppColors.primary, size: 22),
-            const SizedBox(width: 10),
-            const Text(
-              'System Alerts',
-              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
-            ),
-          ],
-        ),
+        title: const Row(children: [
+          Icon(Icons.sensors, color: AppColors.primary, size: 22),
+          SizedBox(width: 10),
+          Text('System Alerts',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary)),
+        ]),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16),
@@ -168,14 +128,13 @@ class _AlertsScreenState extends State<AlertsScreen> {
               clipBehavior: Clip.none,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.notifications_outlined, color: AppColors.textSecondary),
+                  icon: const Icon(Icons.notifications_outlined,
+                      color: AppColors.textSecondary),
                   onPressed: () {},
                 ),
-                /// Blinking red dot — HTML: animate-ping class
                 if (_allAlerts.any((a) => !a.isResolved))
                   Positioned(
-                    top: 8,
-                    right: 8,
+                    top: 8, right: 8,
                     child: _BlinkingDot(),
                   ),
               ],
@@ -183,90 +142,78 @@ class _AlertsScreenState extends State<AlertsScreen> {
           ),
         ],
       ),
-
-      body: Column(
-        children: [
-          /// Filter tab bar — sticky below the AppBar
-          /// HTML: <nav class="sticky top-[73px] ...">
-          _FilterTabBar(
-            selectedIndex: _selectedTab,
-            onChanged: (index) => setState(() => _selectedTab = index),
-          ),
-
-          /// Scrollable alerts list
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-                : RefreshIndicator(
-                    onRefresh: _fetchAlerts,
-                    color: AppColors.primary,
-                    child: ListView(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-                      children: [
-                        /// Critical section
-                        if (criticalAlerts.isNotEmpty) ...[
-                          _SectionLabel(
-                            label: 'Critical Priority',
-                            badgeText: '${criticalAlerts.length} Active',
-                            badgeColor: AppColors.red,
+      body: Column(children: [
+        _FilterTabBar(
+          selectedIndex: _selectedTab,
+          onChanged:     (index) => setState(() => _selectedTab = index),
+        ),
+        Expanded(
+          child: _isLoading
+              ? const Center(
+                  child: CircularProgressIndicator(color: AppColors.primary))
+              : RefreshIndicator(
+                  onRefresh: _fetchAlerts,
+                  color: AppColors.primary,
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+                    children: [
+                      if (criticalAlerts.isNotEmpty) ...[
+                        _SectionLabel(
+                          label:      'Critical Priority',
+                          badgeText:  '${criticalAlerts.length} Active',
+                          badgeColor: AppColors.red,
+                        ),
+                        const SizedBox(height: 8),
+                        ...criticalAlerts.map((alert) => Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: AlertCard(
+                            alert:     alert,
+                            onExplain: () => _explainAlert(alert),
+                            onDismiss: () => _dismissAlert(alert.id),
                           ),
-                          const SizedBox(height: 8),
-                          ...criticalAlerts.map((alert) => Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: AlertCard(
-                              alert: alert,
-                              onExplain: () => _explainAlert(alert),
-                              onDismiss: () => _dismissAlert(alert.id),
-                            ),
-                          )),
-                          const SizedBox(height: 16),
-                        ],
-
-                        /// Warning section
-                        if (warningAlerts.isNotEmpty) ...[
-                          _SectionLabel(
-                            label: 'Warning Status',
-                            badgeText: '${warningAlerts.length} Active',
-                            badgeColor: AppColors.orange,
-                          ),
-                          const SizedBox(height: 8),
-                          ...warningAlerts.map((alert) => Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: AlertCard(
-                              alert: alert,
-                              onExplain: () => _explainAlert(alert),
-                              onDismiss: () => _dismissAlert(alert.id),
-                            ),
-                          )),
-                          const SizedBox(height: 16),
-                        ],
-
-                        /// Resolved / Earlier today section
-                        if (resolvedAlerts.isNotEmpty) ...[
-                          const _SectionLabel(label: 'Earlier Today'),
-                          const SizedBox(height: 8),
-                          ...resolvedAlerts.map((alert) => Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: _ResolvedAlertCard(alert: alert),
-                          )),
-                        ],
-
-                        if (_filteredAlerts.isEmpty)
-                          const Center(
-                            child: Padding(
-                              padding: EdgeInsets.all(48),
-                              child: Text('No alerts', style: TextStyle(color: AppColors.textMuted)),
-                            ),
-                          ),
+                        )),
+                        const SizedBox(height: 16),
                       ],
-                    ),
+                      if (warningAlerts.isNotEmpty) ...[
+                        _SectionLabel(
+                          label:      'Warning Status',
+                          badgeText:  '${warningAlerts.length} Active',
+                          badgeColor: AppColors.orange,
+                        ),
+                        const SizedBox(height: 8),
+                        ...warningAlerts.map((alert) => Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: AlertCard(
+                            alert:     alert,
+                            onExplain: () => _explainAlert(alert),
+                            onDismiss: () => _dismissAlert(alert.id),
+                          ),
+                        )),
+                        const SizedBox(height: 16),
+                      ],
+                      if (resolvedAlerts.isNotEmpty) ...[
+                        const _SectionLabel(label: 'Earlier Today'),
+                        const SizedBox(height: 8),
+                        ...resolvedAlerts.map((alert) => Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: _ResolvedAlertCard(alert: alert),
+                        )),
+                      ],
+                      if (_filteredAlerts.isEmpty)
+                        const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(48),
+                            child: Text('No alerts',
+                                style: TextStyle(color: AppColors.textMuted)),
+                          ),
+                        ),
+                    ],
                   ),
-          ),
-        ],
-      ),
-
+                ),
+        ),
+      ]),
       bottomNavigationBar: AppBottomNavBar(
-        currentIndex: 2, // Alerts tab is active
+        currentIndex: 2,
         onTap: (index) {
           if (index == 0) Navigator.pushReplacementNamed(context, '/dashboard');
         },
@@ -275,14 +222,10 @@ class _AlertsScreenState extends State<AlertsScreen> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Sub-widget: _FilterTabBar
-// HTML: <nav class="..."><button class="border-b-2 border-primary">All Alerts</button>...
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Filter tab bar ────────────────────────────────────────────────────────────
 class _FilterTabBar extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onChanged;
-
   const _FilterTabBar({required this.selectedIndex, required this.onChanged});
 
   static const _tabs = ['All Alerts', 'Critical', 'Warning', 'Resolved'];
@@ -295,7 +238,7 @@ class _FilterTabBar extends StatelessWidget {
         border: Border(bottom: BorderSide(color: AppColors.border)),
       ),
       child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal, // HTML: overflow-x: auto
+        scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Row(
           children: List.generate(_tabs.length, (index) {
@@ -304,24 +247,20 @@ class _FilterTabBar extends StatelessWidget {
               onTap: () => onChanged(index),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
-                margin: const EdgeInsets.only(right: 8),
+                margin:  const EdgeInsets.only(right: 8),
                 decoration: BoxDecoration(
                   border: Border(
                     bottom: BorderSide(
-                      /// HTML: border-b-2 border-primary (if active) or border-transparent
                       color: isSelected ? AppColors.primary : Colors.transparent,
                       width: 2,
                     ),
                   ),
                 ),
-                child: Text(
-                  _tabs[index],
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: isSelected ? AppColors.primary : AppColors.textSecondary,
-                  ),
-                ),
+                child: Text(_tabs[index],
+                    style: TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w700,
+                        color: isSelected
+                            ? AppColors.primary : AppColors.textSecondary)),
               ),
             );
           }),
@@ -331,15 +270,11 @@ class _FilterTabBar extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Sub-widget: _SectionLabel
-// HTML: <h2 class="text-xs font-bold uppercase tracking-widest text-slate-400">
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Section label ─────────────────────────────────────────────────────────────
 class _SectionLabel extends StatelessWidget {
-  final String label;
+  final String  label;
   final String? badgeText;
-  final Color? badgeColor;
-
+  final Color?  badgeColor;
   const _SectionLabel({required this.label, this.badgeText, this.badgeColor});
 
   @override
@@ -347,36 +282,26 @@ class _SectionLabel extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          label.toUpperCase(),
-          style: const TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textSecondary,
-            letterSpacing: 1.5,
-          ),
-        ),
+        Text(label.toUpperCase(),
+            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
+                color: AppColors.textSecondary, letterSpacing: 1.5)),
         if (badgeText != null)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: badgeColor!.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(4),
+              color:         badgeColor!.withValues(alpha: 0.1),
+              borderRadius:  BorderRadius.circular(4),
             ),
-            child: Text(
-              badgeText!,
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: badgeColor),
-            ),
+            child: Text(badgeText!,
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500,
+                    color: badgeColor)),
           ),
       ],
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Sub-widget: _ResolvedAlertCard
-// Dimmed card for past/resolved alerts — HTML: opacity-60
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Resolved alert card ────────────────────────────────────────────────────────
 class _ResolvedAlertCard extends StatelessWidget {
   final AlertModel alert;
   const _ResolvedAlertCard({required this.alert});
@@ -384,146 +309,243 @@ class _ResolvedAlertCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Opacity(
-      opacity: 0.6, // HTML: opacity-60
+      opacity: 0.6,
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding:    const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceLight,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.router_outlined, color: AppColors.textMuted, size: 24),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(alert.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
-                      ),
-                      Text(alert.relativeTime, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text('${alert.location} • 45ms average', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-                ],
-              ),
-            ),
-          ],
-        ),
+            color:         AppColors.surface,
+            borderRadius:  BorderRadius.circular(12)),
+        child: Row(children: [
+          Container(
+            padding:    const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+                color:         AppColors.surfaceLight,
+                borderRadius:  BorderRadius.circular(8)),
+            child: const Icon(Icons.router_outlined,
+                color: AppColors.textMuted, size: 24),
+          ),
+          const SizedBox(width: 16),
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Expanded(child: Text(alert.title,
+                    style: const TextStyle(fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.textPrimary))),
+                Text(alert.relativeTime,
+                    style: const TextStyle(fontSize: 11,
+                        color: AppColors.textSecondary)),
+              ]),
+              const SizedBox(height: 4),
+              Text('${alert.location} • resolved',
+                  style: const TextStyle(fontSize: 12,
+                      color: AppColors.textSecondary)),
+            ],
+          )),
+        ]),
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Sub-widget: _BlinkingDot
-// HTML: <span class="animate-ping ...">  (Tailwind's ping animation)
-// Flutter: Uses an AnimationController to pulse opacity
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Blinking dot ──────────────────────────────────────────────────────────────
 class _BlinkingDot extends StatefulWidget {
   @override
   State<_BlinkingDot> createState() => _BlinkingDotState();
 }
 
-class _BlinkingDotState extends State<_BlinkingDot> with SingleTickerProviderStateMixin {
+class _BlinkingDotState extends State<_BlinkingDot>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  late Animation<double> _animation;
+  late Animation<double>   _animation;
 
   @override
   void initState() {
     super.initState();
-    /// AnimationController drives the animation over time
-    /// HTML: @keyframes ping { 0% { opacity: 1; } 100% { opacity: 0; } }
     _controller = AnimationController(
-      vsync: this,
+      vsync:    this,
       duration: const Duration(milliseconds: 900),
-    )..repeat(reverse: true); // Repeats back and forth (like ping)
-
+    )..repeat(reverse: true);
     _animation = CurvedAnimation(parent: _controller, curve: Curves.easeInOut);
   }
 
   @override
   void dispose() {
-    _controller.dispose(); // Always dispose animation controllers!
+    _controller.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: _animation,
-      child: Container(
-        width: 8,
-        height: 8,
+  Widget build(BuildContext context) => FadeTransition(
+    opacity: _animation,
+    child: Container(width: 8, height: 8,
         decoration: const BoxDecoration(
-          color: AppColors.red,
-          shape: BoxShape.circle,
-        ),
-      ),
-    );
-  }
+            color: AppColors.red, shape: BoxShape.circle)),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Sub-widget: _ExplainBottomSheet
-// A modal bottom sheet explaining the alert — like a mobile popup
-// HTML: would be a modal <dialog> or overlay div
+// _ExplainBottomSheet
+//
+// ISSUE 2 FIX:
+//   Now receives a XaiData object. All hardcoded text has been removed.
+//   Displays:
+//     • Risk Score (xai.score as percentage bar)
+//     • Level (xai.levelDisplay)
+//     • Reason (xai.reason — generated by ESP firmware)
 // ─────────────────────────────────────────────────────────────────────────────
 class _ExplainBottomSheet extends StatelessWidget {
   final AlertModel alert;
-  const _ExplainBottomSheet({required this.alert});
+  final XaiData    xai;
+
+  const _ExplainBottomSheet({required this.alert, required this.xai});
+
+  Color get _levelColor {
+    switch (xai.level.toLowerCase()) {
+      case 'critique': return AppColors.red;
+      case 'warning':  return AppColors.orange;
+      default:         return AppColors.emerald;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.auto_awesome, color: AppColors.primary, size: 20),
+    return Padding(
+      // Prevent sheet from hiding behind keyboard
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize:      MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+
+            // ── Header ──────────────────────────────────────────────────────
+            Row(children: [
+              const Icon(Icons.auto_awesome,
+                  color: AppColors.primary, size: 20),
               const SizedBox(width: 8),
-              const Text('AI Explanation', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              const Text('AI Explanation',
+                  style: TextStyle(fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary)),
               const Spacer(),
               IconButton(
-                icon: const Icon(Icons.close, color: AppColors.textSecondary),
+                icon: const Icon(Icons.close,
+                    color: AppColors.textSecondary),
                 onPressed: () => Navigator.pop(context),
               ),
-            ],
-          ),
-          const Divider(color: AppColors.border),
-          const SizedBox(height: 12),
-          Text(alert.title, style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-          const SizedBox(height: 8),
-          const Text(
-            'This alert was triggered because the sensor reading exceeded the configured threshold. '
-            'High temperatures in server racks can lead to hardware throttling, reduced lifespan, '
-            'or unexpected shutdowns. Immediate cooling action is recommended.',
-            style: TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.6),
-          ),
-          const SizedBox(height: 24),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () => Navigator.pop(context),
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-              child: const Text('Got it', style: TextStyle(color: Colors.white)),
+            ]),
+            const Divider(color: AppColors.border),
+            const SizedBox(height: 8),
+
+            // ── Alert title ──────────────────────────────────────────────────
+            Text(alert.title,
+                style: const TextStyle(fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+            const SizedBox(height: 16),
+
+            // ── Risk Score ───────────────────────────────────────────────────
+            Row(children: [
+              const Text('Risk Score:',
+                  style: TextStyle(fontSize: 13,
+                      color: AppColors.textSecondary)),
+              const SizedBox(width: 8),
+              Text(
+                xai.score.toStringAsFixed(2),
+                style: TextStyle(fontSize: 13,
+                    fontWeight: FontWeight.w700, color: _levelColor),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value:           xai.score.clamp(0.0, 1.0),
+                    backgroundColor: AppColors.border,
+                    color:           _levelColor,
+                    minHeight:       6,
+                  ),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 12),
+
+            // ── Level ────────────────────────────────────────────────────────
+            Row(children: [
+              const Text('Level:',
+                  style: TextStyle(fontSize: 13,
+                      color: AppColors.textSecondary)),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color:        _levelColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(6),
+                  border:       Border.all(
+                      color: _levelColor.withValues(alpha: 0.4)),
+                ),
+                child: Text(
+                  xai.levelDisplay.toUpperCase(),
+                  style: TextStyle(fontSize: 11,
+                      fontWeight: FontWeight.w700, color: _levelColor,
+                      letterSpacing: 1.0),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 16),
+
+            // ── Explanation reason ────────────────────────────────────────────
+            Container(
+              width:   double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color:        AppColors.primary.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(10),
+                border:       Border.all(
+                    color: AppColors.primary.withValues(alpha: 0.2)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(children: [
+                    Icon(Icons.psychology_outlined,
+                        color: AppColors.primary, size: 16),
+                    SizedBox(width: 6),
+                    Text('Explanation',
+                        style: TextStyle(fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.primary)),
+                  ]),
+                  const SizedBox(height: 8),
+                  // ── xai.reason comes from ESP firmware — no hardcoded text ──
+                  Text(
+                    xai.reason,
+                    style: const TextStyle(fontSize: 13,
+                        color: AppColors.textSecondary, height: 1.6),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 20),
+
+            // ── Got it button ─────────────────────────────────────────────────
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary),
+                child: const Text('Got it',
+                    style: TextStyle(color: Colors.white)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

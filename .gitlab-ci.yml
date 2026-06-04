@@ -26,6 +26,5 @@ flutter_build:
   artifacts:
     paths:
       - build/app/outputs/flutter-apk/app-release.apk
-    expire_in: 7 days
   only:
     - main

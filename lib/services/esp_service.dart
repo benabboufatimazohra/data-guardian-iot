@@ -1,20 +1,18 @@
 // lib/services/esp_service.dart
-//
-// CHANGED: No longer saves every sensor reading to SQLite.
-//          Only saves CRITICAL alerts to save storage space.
-//          Regular polling still works and streams data to the UI.
 
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
 import '../models/models.dart';
-import '../database/database_helper.dart';
+import 'alert_service.dart';
 
 class EspService {
   EspService._internal();
   static final EspService instance = EspService._internal();
 
+  // ── Streams ───────────────────────────────────────────────────────────────
   final _dataController       = StreamController<EnvironmentData>.broadcast();
   final _errorController      = StreamController<String>.broadcast();
   final _connectionController = StreamController<bool>.broadcast();
@@ -23,23 +21,44 @@ class EspService {
   Stream<String>          get errorStream      => _errorController.stream;
   Stream<bool>            get connectionStream => _connectionController.stream;
 
-  Timer? _pollingTimer;
-  bool   _isConnected = false;
+  // ── State ─────────────────────────────────────────────────────────────────
+  Timer?           _pollingTimer;
+  bool             _isConnected = false;
   EnvironmentData? _lastData;
+
+  /// Latest XAI data from the ESP — updated on every successful poll.
+  XaiData? _lastXai;
 
   EnvironmentData? get lastData    => _lastData;
   bool             get isConnected => _isConnected;
 
+  /// The most recent XAI explanation received from the ESP.
+  /// Returns XaiData.empty() if no data has been received yet.
+  XaiData get lastXai => _lastXai ?? XaiData.empty();
+
+  BuildContext? _activeContext;
+  void setContext(BuildContext? ctx) => _activeContext = ctx;
+
+  // ── Polling ───────────────────────────────────────────────────────────────
+
   void startPolling() {
     fetchOnce();
     _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(ApiConfig.pollingInterval, (_) => fetchOnce());
+    _pollingTimer =
+        Timer.periodic(ApiConfig.pollingInterval, (_) => fetchOnce());
   }
 
   void stopPolling() {
     _pollingTimer?.cancel();
     _pollingTimer = null;
   }
+
+  void restartPolling() {
+    stopPolling();
+    startPolling();
+  }
+
+  // ── Single fetch ──────────────────────────────────────────────────────────
 
   Future<EnvironmentData?> fetchOnce() async {
     try {
@@ -58,22 +77,14 @@ class EspService {
 
         final data = EnvironmentData.fromJson(json);
         _lastData = data;
-        _setConnected(true);
 
-        // ── Send to UI via stream ────────────────────────────────────────
+        // ── Store latest XAI ─────────────────────────────────────────────
+        _lastXai = data.xai;
+
+        _setConnected(true);
         _dataController.add(data);
 
-        // ── Save ONLY critical alerts to SQLite (saves storage space) ────
-        // We do NOT save sensor readings anymore.
-        // We only save alerts that are critical severity.
-        final liveAlerts = AlertModel.fromEspData(data);
-        for (final alert in liveAlerts) {
-          if (alert.severity == AlertSeverity.critical) {
-            await DatabaseHelper.instance.insertAlert(alert, espId: data.deviceId);
-          }
-          // Warning and info alerts are shown in UI but NOT stored
-        }
-        // ─────────────────────────────────────────────────────────────────
+        await AlertService.instance.evaluate(data, context: _activeContext);
 
         return data;
       } else {
@@ -84,7 +95,7 @@ class EspService {
     } on TimeoutException {
       _setConnected(false);
       _errorController
-          .add('Timeout — ESP not responding (${ApiConfig.espIpAddress})');
+          .add('Timeout — ESP not responding at ${ApiConfig.baseUrl}');
       return null;
     } catch (e) {
       _setConnected(false);
@@ -97,7 +108,7 @@ class EspService {
     try {
       final response = await http
           .get(Uri.parse(ApiConfig.healthUrl))
-          .timeout(const Duration(seconds: 2));
+          .timeout(const Duration(seconds: 3));
       final ok = response.statusCode == 200;
       _setConnected(ok);
       return ok;
@@ -114,4 +125,3 @@ class EspService {
     }
   }
 }
-
