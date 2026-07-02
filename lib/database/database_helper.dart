@@ -128,8 +128,8 @@ class DatabaseHelper {
 
     // Responsable assigné à l'ESP de démo
     await db.insert('users', {
-      'full_name'       : 'Mohammed Alami',
-      'email'           : 'alami@dataguardian.com',
+      'full_name'       : 'Benabbou Fatima Zohra',
+      'email'           : 'Fatima@dataguardian.com',
       'password_hash'   : _hashPassword('Resp@1234'),
       'role'            : 'responsable',
       'assigned_esp_id' : 'ESP8266-01',
@@ -145,9 +145,10 @@ class DatabaseHelper {
   Future<AppUser?> login(String email, String password) async {
     final db   = await database;
     final hash = _hashPassword(password);
+    final normalizedEmail = email.trim().toLowerCase();
     final rows = await db.query('users',
-        where:     'email = ? AND password_hash = ?',
-        whereArgs: [email.trim().toLowerCase(), hash]);
+        where:     'lower(email) = ? AND password_hash = ?',
+        whereArgs: [normalizedEmail, hash]);
     if (rows.isEmpty) return null;
     return AppUser.fromMap(rows.first);
   }
@@ -157,7 +158,7 @@ class DatabaseHelper {
     final db = await database;
     return db.insert('users', {
       'full_name'       : user.fullName,
-      'email'           : user.email.toLowerCase(),
+      'email'           : user.email.trim().toLowerCase(),
       'password_hash'   : _hashPassword(password),
       'role'            : user.role,
       'assigned_esp_id' : user.assignedEspId,
@@ -178,7 +179,7 @@ class DatabaseHelper {
     await db.update('users',
       {
         'full_name'       : user.fullName,
-        'email'           : user.email,
+        'email'           : user.email.trim().toLowerCase(),
         'role'            : user.role,
         'assigned_esp_id' : user.assignedEspId,
       },

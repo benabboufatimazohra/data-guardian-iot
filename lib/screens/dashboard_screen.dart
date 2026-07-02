@@ -1,11 +1,29 @@
 // lib/screens/dashboard_screen.dart
 //
-// CHANGES vs original:
-//   1. Added _EspConfigBar between SystemStatusCard and sensor grid.
-//      - TextField pre-filled with ApiConfig.baseUrl.
-//      - "Save" button validates, persists, and restarts polling.
-//   2. EspService.setContext(context) called so AlertService can show dialogs.
-//   3. setContext(null) called in dispose() to avoid stale context leaks.
+// OVERFLOW FIXES (3 separate RIGHT OVERFLOW errors):
+//
+//  FIX 1 — RIGHT OVERFLOWED BY ~17px  →  _buildAppBar() title Row
+//    The Row([Icon, SizedBox, Text]) inside AppBar title had no Flexible on the
+//    Text. AppBar constrains its title slot to (screen_width - leading - actions).
+//    On narrow screens the unconstrained Text pushed into the actions area.
+//    Fix: wrap Text in Flexible + overflow: TextOverflow.ellipsis.
+//
+//  FIX 2 — RIGHT OVERFLOWED BY ~20px  →  _SystemStatusCard status Row
+//    Row([Text(statusText, 20pt), SizedBox(10), Text('MAJ:...', 12pt), Spacer(),
+//         ElevatedButton])
+//    The Spacer only absorbs leftover space; if the two variable-width Texts +
+//    button already fill the row, they overflow. Fix: move both texts into an
+//    Expanded(Column(...)) so the button always fits at its natural width.
+//
+//  FIX 3 — RIGHT OVERFLOWED BY ~26px  →  _EspConfigBar error message Row
+//    Row([Icon(13), SizedBox(4), Text(_error!)]) with no Expanded on the Text.
+//    Long validation messages like "No host found. Example: http://192.168.1.10"
+//    (≈43 chars at 11pt) exceeded the available card width on phones ~360-375px.
+//    Fix: wrap Text(_error!) in Expanded.
+//
+//  ADDITIONAL DEFENSIVE FIXES (prevent overflow at other font scales):
+//    • _SectionHeader: Text in Expanded (was bare in a Row with an Icon).
+//    • _ConnectionBadge: Text in Flexible with ellipsis (AppBar action slot).
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -23,7 +41,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   int _navIndex = 0;
-  EnvironmentData _envData = EnvironmentData.mock();
+  EnvironmentData _envData    = EnvironmentData.mock();
   bool    _isLoading   = true;
   bool    _isConnected = false;
   String? _errorMsg;
@@ -35,18 +53,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-
-    // Register context so AlertService can show dialogs
     EspService.instance.setContext(context);
 
     _dataSub = EspService.instance.dataStream.listen((data) {
-      if (mounted) {
-        setState(() {
-          _envData   = data;
-          _isLoading = false;
-          _errorMsg  = null;
-        });
-      }
+      if (mounted) setState(() { _envData = data; _isLoading = false; _errorMsg = null; });
     });
     _errorSub = EspService.instance.errorStream.listen((err) {
       if (mounted) setState(() { _errorMsg = err; _isLoading = false; });
@@ -60,7 +70,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
-    // Unregister context to prevent stale reference after navigation
     EspService.instance.setContext(null);
     _dataSub?.cancel();
     _errorSub?.cancel();
@@ -80,7 +89,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: _buildAppBar(),
       body: RefreshIndicator(
         onRefresh: _refresh,
-        color: AppColors.primary,
+        color:     AppColors.primary,
         backgroundColor: AppColors.surface,
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -88,11 +97,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Network error banner ──────────────────────────────────
               if (_errorMsg != null && !_isConnected)
                 _ErrorBanner(message: _errorMsg!),
 
-              // ── System status card ────────────────────────────────────
               _SystemStatusCard(
                 isConnected:     _isConnected,
                 lastUpdatedText: _envData.lastUpdatedText,
@@ -100,28 +107,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(height: 16),
 
-              // ── ESP IP configuration bar (NEW) ────────────────────────
               _EspConfigBar(
                 onSaved: () {
-                  // Restart polling with the new URL
                   EspService.instance.restartPolling();
                   setState(() => _isLoading = true);
                 },
               ),
               const SizedBox(height: 24),
 
-              // ── Sensor grid ────────────────────────────────────────────
-              _SectionHeader(icon: Icons.thermostat, label: 'Environmental Metrics'),
+              const _SectionHeader(icon: Icons.thermostat, label: 'Environmental Metrics'),
               const SizedBox(height: 12),
 
-              _isLoading
-                  ? _LoadingCards()
-                  : _SensorGrid(data: _envData),
+              _isLoading ? _LoadingCards() : _SensorGrid(data: _envData),
 
               const SizedBox(height: 24),
 
-              // ── Recent activity ────────────────────────────────────────
-              _SectionHeader(icon: Icons.history, label: 'Recent Activity'),
+              const _SectionHeader(icon: Icons.history, label: 'Recent Activity'),
               const SizedBox(height: 12),
               _LiveActivityList(data: _envData),
             ],
@@ -139,6 +140,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  // ── FIX 1: AppBar title — Text wrapped in Flexible ─────────────────────────
   AppBar _buildAppBar() {
     return AppBar(
       backgroundColor: AppColors.backgroundDark.withValues(alpha: 0.9),
@@ -147,14 +149,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
         preferredSize: Size.fromHeight(1),
         child: Divider(color: AppColors.border, height: 1),
       ),
-      title: const Row(children: [
-        Icon(Icons.dns, color: AppColors.primary, size: 22),
-        SizedBox(width: 10),
-        Text('Server Room A',
+      title: Row(children: [
+        const Icon(Icons.dns, color: AppColors.primary, size: 22),
+        const SizedBox(width: 10),
+        // FIX 1: Flexible prevents the Text from overflowing the title slot.
+        const Flexible(
+          child: Text(
+            'Server Room A',
             style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary)),
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
       ]),
       actions: [
         _ConnectionBadge(isConnected: _isConnected),
@@ -164,7 +173,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// _EspConfigBar — lets the user change the ESP8266 IP without rebuilding
+// _EspConfigBar
 // ═════════════════════════════════════════════════════════════════════════════
 class _EspConfigBar extends StatefulWidget {
   final VoidCallback onSaved;
@@ -176,9 +185,9 @@ class _EspConfigBar extends StatefulWidget {
 
 class _EspConfigBarState extends State<_EspConfigBar> {
   late TextEditingController _ctrl;
-  bool   _isSaving = false;
+  bool    _isSaving = false;
   String? _error;
-  bool   _saved  = false;
+  bool    _saved  = false;
 
   @override
   void initState() {
@@ -194,16 +203,13 @@ class _EspConfigBarState extends State<_EspConfigBar> {
 
   Future<void> _save() async {
     setState(() { _isSaving = true; _error = null; _saved = false; });
-
     final err = await ApiConfig.save(_ctrl.text);
     if (!mounted) return;
-
     if (err != null) {
       setState(() { _error = err; _isSaving = false; });
     } else {
       setState(() { _isSaving = false; _saved = true; });
       widget.onSaved();
-      // Clear the "Saved!" confirmation after 2 s
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) setState(() => _saved = false);
       });
@@ -228,62 +234,42 @@ class _EspConfigBarState extends State<_EspConfigBar> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Header ────────────────────────────────────────────────────
+          // Header row (has Spacer — no overflow risk)
           Row(children: [
             const Icon(Icons.wifi, color: AppColors.primary, size: 16),
             const SizedBox(width: 6),
             const Text(
               'ESP8266 API Address',
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary),
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
             ),
             const Spacer(),
             if (_saved)
-              Row(children: const [
+              const Row(children: [
                 Icon(Icons.check_circle, color: AppColors.emerald, size: 14),
                 SizedBox(width: 4),
-                Text('Saved!',
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: AppColors.emerald,
-                        fontWeight: FontWeight.w700)),
+                Text('Saved!', style: TextStyle(fontSize: 11, color: AppColors.emerald, fontWeight: FontWeight.w700)),
               ]),
           ]),
           const SizedBox(height: 8),
 
-          // ── Input row ─────────────────────────────────────────────────
+          // Input row
           Row(children: [
             Expanded(
               child: TextField(
-                controller: _ctrl,
-                style: const TextStyle(
-                    color: AppColors.textPrimary, fontSize: 13),
+                controller:  _ctrl,
+                style:       const TextStyle(color: AppColors.textPrimary, fontSize: 13),
                 keyboardType: TextInputType.url,
                 autocorrect: false,
                 decoration: InputDecoration(
-                  hintText: 'http://192.168.1.104',
-                  hintStyle: const TextStyle(
-                      color: AppColors.textMuted, fontSize: 13),
-                  filled: true,
-                  fillColor: AppColors.backgroundDark,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(
-                        color: AppColors.primary, width: 1.5),
-                  ),
+                  hintText:  'http://192.168.1.104',
+                  hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                  filled:     true,
+                  fillColor:  AppColors.backgroundDark,
+                  isDense:    true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.primary, width: 1.5)),
                 ),
                 onSubmitted: (_) => _save(),
               ),
@@ -296,40 +282,35 @@ class _EspConfigBarState extends State<_EspConfigBar> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
+                  elevation:       0,
+                  padding:         const EdgeInsets.symmetric(horizontal: 16),
+                  shape:           RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
                 child: _isSaving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2))
-                    : const Text('Save',
-                        style: TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w700)),
+                    ? const SizedBox(width: 16, height: 16,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Text('Save', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
               ),
             ),
           ]),
 
-          // ── Validation error ───────────────────────────────────────────
+          // ── FIX 3: error message Text wrapped in Expanded ─────────────────
           if (_error != null) ...[
             const SizedBox(height: 6),
             Row(children: [
               const Icon(Icons.error_outline, color: AppColors.red, size: 13),
               const SizedBox(width: 4),
-              Text(_error!,
-                  style: const TextStyle(
-                      fontSize: 11, color: AppColors.red)),
+              // FIX 3: Expanded lets long validation messages wrap instead of overflowing.
+              Expanded(
+                child: Text(_error!, style: const TextStyle(fontSize: 11, color: AppColors.red)),
+              ),
             ]),
           ],
 
-          // ── Hint ──────────────────────────────────────────────────────
           const SizedBox(height: 6),
+          // Hint text is in a Column so it auto-wraps — no overflow risk.
           const Text(
-            'Examples: http://192.168.1.104  or  http://192.168.1.104:80',
+            'Exemples : http://192.168.1.104  ou  http://192.168.1.104:80',
             style: TextStyle(fontSize: 10, color: AppColors.textMuted),
           ),
         ],
@@ -338,7 +319,7 @@ class _EspConfigBarState extends State<_EspConfigBar> {
   }
 }
 
-// ─── Badge ONLINE / OFFLINE ───────────────────────────────────────────────────
+// ─── Connection badge ─────────────────────────────────────────────────────────
 class _ConnectionBadge extends StatelessWidget {
   final bool isConnected;
   const _ConnectionBadge({required this.isConnected});
@@ -347,31 +328,32 @@ class _ConnectionBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = isConnected ? AppColors.emerald : AppColors.red;
     return Container(
-      margin: const EdgeInsets.only(right: 16),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      margin:  const EdgeInsets.only(right: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        color:        color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        border:       Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-        const SizedBox(width: 6),
-        Text(isConnected ? 'ONLINE' : 'OFFLINE',
-            style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1,
-                color: color)),
+          width: 7, height: 7,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 5),
+        // Defensive Flexible in case AppBar shrinks the action slot.
+        Flexible(
+          child: Text(
+            isConnected ? 'ONLINE' : 'OFFLINE',
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8, color: color),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
       ]),
     );
   }
 }
 
-// ─── Bannière erreur ──────────────────────────────────────────────────────────
+// ─── Error banner ─────────────────────────────────────────────────────────────
 class _ErrorBanner extends StatelessWidget {
   final String message;
   const _ErrorBanner({required this.message});
@@ -379,30 +361,29 @@ class _ErrorBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
+      width:  double.infinity,
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.red.withValues(alpha: 0.1),
+        color:        AppColors.red.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.red.withValues(alpha: 0.3)),
+        border:       Border.all(color: AppColors.red.withValues(alpha: 0.3)),
       ),
       child: Row(children: [
         const Icon(Icons.wifi_off, color: AppColors.red, size: 18),
         const SizedBox(width: 8),
-        Expanded(
-            child: Text(message,
-                style: const TextStyle(fontSize: 12, color: AppColors.red))),
+        Expanded(child: Text(message, style: const TextStyle(fontSize: 12, color: AppColors.red))),
       ]),
     );
   }
 }
 
-// ─── Carte statut système ─────────────────────────────────────────────────────
+// ─── System status card ───────────────────────────────────────────────────────
 class _SystemStatusCard extends StatelessWidget {
   final bool   isConnected;
   final String lastUpdatedText;
   final bool   hasAlerts;
+
   const _SystemStatusCard({
     required this.isConnected,
     required this.lastUpdatedText,
@@ -424,86 +405,92 @@ class _SystemStatusCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color:        AppColors.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
+        border:       Border.all(color: AppColors.border),
       ),
       child: Column(children: [
+        // Gradient hero icon
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(28),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                AppColors.primary.withValues(alpha: 0.15),
-                Colors.transparent
-              ],
+              end:   Alignment.bottomRight,
+              colors: [AppColors.primary.withValues(alpha: 0.15), Colors.transparent],
             ),
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(16)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
           ),
           child: Center(
             child: Container(
-              width: 80,
-              height: 80,
+              width: 80, height: 80,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(color: statusColor, width: 3),
-                color: statusColor.withValues(alpha: 0.1),
+                color:  statusColor.withValues(alpha: 0.1),
               ),
               child: Icon(
-                  hasAlerts
-                      ? Icons.warning_amber_rounded
-                      : Icons.check_circle,
-                  color: statusColor,
-                  size: 40),
+                hasAlerts ? Icons.warning_amber_rounded : Icons.check_circle,
+                color: statusColor, size: 40),
             ),
           ),
         ),
+
+        // Info section
         Padding(
           padding: const EdgeInsets.all(20),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('OVERALL HEALTH',
-                style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textMuted,
-                    letterSpacing: 2)),
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
+                    color: AppColors.textMuted, letterSpacing: 2)),
             const SizedBox(height: 4),
             const Text('System Status',
-                style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary)),
             const SizedBox(height: 12),
-            Row(children: [
-              Text(statusText,
-                  style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      color: statusColor)),
-              const SizedBox(width: 10),
-              Text('MAJ : $lastUpdatedText',
-                  style: const TextStyle(
-                      fontSize: 12, color: AppColors.textSecondary)),
-              const Spacer(),
-              ElevatedButton(
-                onPressed: () =>
-                    Navigator.pushNamed(context, '/alerts'),
-                style: ElevatedButton.styleFrom(
+
+            // ── FIX 2: restructured to Expanded(Column) + Button ────────────
+            // Previously: Row([Text(20pt), SizedBox(10), Text(12pt), Spacer(), Button])
+            // → all non-Spacer children were rigid; on narrow screens they overflowed.
+            // Now: Expanded Column absorbs any leftover width; Button keeps its size.
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(statusText,
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            color: statusColor,
+                          )),
+                      const SizedBox(height: 2),
+                      Text('MAJ : $lastUpdatedText',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          )),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: () => Navigator.of(context).pushNamed('/alerts'),
+                  style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8))),
-                child: const Text('View Alerts',
-                    style: TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.w600)),
-              ),
-            ]),
+                    padding:         const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    shape:           RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: const Text('Alertes',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ),
           ]),
         ),
       ]),
@@ -518,50 +505,50 @@ class _SectionHeader extends StatelessWidget {
   const _SectionHeader({required this.icon, required this.label});
 
   @override
-  Widget build(BuildContext context) => Row(children: [
-        Icon(icon, color: AppColors.primary, size: 22),
-        const SizedBox(width: 8),
-        Text(label,
-            style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary)),
-      ]);
+  Widget build(BuildContext context) {
+    return Row(children: [
+      Icon(icon, color: AppColors.primary, size: 22),
+      const SizedBox(width: 8),
+      // Defensive fix: Expanded prevents overflow if label is very long.
+      Expanded(
+        child: Text(
+          label,
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+    ]);
+  }
 }
 
 // ─── Skeleton loader ──────────────────────────────────────────────────────────
 class _LoadingCards extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Column(
-        children: List.generate(
-          3,
-          (_) => Container(
-            height: 160,
-            margin: const EdgeInsets.only(bottom: 12),
-            decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border)),
-            child: const Center(
-                child: CircularProgressIndicator(
-                    color: AppColors.primary, strokeWidth: 2)),
-          ),
-        ),
-      );
+    children: List.generate(3, (_) => Container(
+      height: 160,
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: const Center(
+        child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2)),
+    )),
+  );
 }
 
-// ─── Grille capteurs ──────────────────────────────────────────────────────────
+// ─── Sensor grid ──────────────────────────────────────────────────────────────
 class _SensorGrid extends StatelessWidget {
   final EnvironmentData data;
   const _SensorGrid({required this.data});
 
   @override
   Widget build(BuildContext context) {
-    final tempFill =
-        ((data.temperature - 18) / (27 - 18)).clamp(0.0, 1.0);
-    final humFill =
-        ((data.humidity - 40) / (60 - 40)).clamp(0.0, 1.0);
-    final waterFill = (data.waterLevelPercent / 100.0).clamp(0.0, 1.0);
+    final tempFill  = ((data.temperature - 18) / (27 - 18)).clamp(0.0, 1.0);
+    final humFill   = ((data.humidity - 40)    / (60 - 40)).clamp(0.0, 1.0);
+    final waterFill = (data.waterLevelPercent  / 100.0).clamp(0.0, 1.0);
 
     final tempColor = data.alerts.tempCritical
         ? AppColors.red
@@ -578,11 +565,7 @@ class _SensorGrid extends StatelessWidget {
       SensorGaugeCard(
         label:       'Temperature',
         value:       '${data.temperature.toStringAsFixed(1)}°C',
-        status:      data.alerts.tempCritical
-            ? 'Critical'
-            : data.alerts.tempWarning
-                ? 'Warning'
-                : 'Optimal',
+        status:      data.alerts.tempCritical ? 'Critical' : data.alerts.tempWarning ? 'Warning' : 'Optimal',
         rangeText:   'Range: 18°C – 27°C',
         gaugeColor:  tempColor,
         fillPercent: tempFill,
@@ -591,11 +574,7 @@ class _SensorGrid extends StatelessWidget {
       SensorGaugeCard(
         label:       'Humidity',
         value:       '${data.humidity.toStringAsFixed(0)}%',
-        status:      data.alerts.humidityLow
-            ? 'Low'
-            : data.alerts.humidityHigh
-                ? 'High'
-                : 'Normal',
+        status:      data.alerts.humidityLow ? 'Low' : data.alerts.humidityHigh ? 'High' : 'Normal',
         rangeText:   'Range: 40% – 60%',
         gaugeColor:  AppColors.sky,
         fillPercent: humFill,
@@ -612,7 +591,7 @@ class _SensorGrid extends StatelessWidget {
   }
 }
 
-// ─── Carte niveau d'eau ───────────────────────────────────────────────────────
+// ─── Water level card ─────────────────────────────────────────────────────────
 class _WaterLevelCard extends StatelessWidget {
   final double levelPercent;
   final int    levelRaw;
@@ -631,28 +610,24 @@ class _WaterLevelCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
+      width:   double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color:        AppColors.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
+        border:       Border.all(color: AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           SizedBox(
-            width: 60,
-            height: 120,
+            width: 60, height: 120,
             child: CustomPaint(
               painter: _WaterTubePainter(fill: fillPercent, color: color),
               child: Center(
                 child: Text(
                   '${levelPercent.toStringAsFixed(0)}%',
-                  style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
                 ),
               ),
             ),
@@ -660,14 +635,13 @@ class _WaterLevelCard extends StatelessWidget {
           const SizedBox(height: 12),
           Text(
             isAlert ? 'Niveau Élevé !' : 'Niveau Normal',
-            style: TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w600, color: color),
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color),
           ),
           const SizedBox(height: 2),
           Text(
             'Valeur brute ADC : $levelRaw / 1023',
-            style: const TextStyle(
-                fontSize: 12, color: AppColors.textSecondary),
+            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            textAlign: TextAlign.center,
           ),
         ],
       ),
@@ -683,30 +657,20 @@ class _WaterTubePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final r    = size.width / 2;
-    final rect = RRect.fromRectAndRadius(
-        Rect.fromLTWH(0, 0, size.width, size.height), Radius.circular(r));
+    final rect = RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, size.width, size.height), Radius.circular(r));
 
-    canvas.drawRRect(
-        rect, Paint()..color = AppColors.border..style = PaintingStyle.fill);
+    canvas.drawRRect(rect, Paint()..color = AppColors.border..style = PaintingStyle.fill);
 
     final fillHeight = size.height * fill;
     final fillRect   = RRect.fromRectAndRadius(
-        Rect.fromLTWH(0, size.height - fillHeight, size.width, fillHeight),
-        Radius.circular(r));
-    canvas.drawRRect(fillRect,
-        Paint()..color = color.withValues(alpha: 0.8)..style = PaintingStyle.fill);
+        Rect.fromLTWH(0, size.height - fillHeight, size.width, fillHeight), Radius.circular(r));
+    canvas.drawRRect(fillRect, Paint()..color = color.withValues(alpha: 0.8)..style = PaintingStyle.fill);
 
-    canvas.drawRRect(
-        rect,
-        Paint()
-          ..color = color.withValues(alpha: 0.5)
-          ..strokeWidth = 2
-          ..style = PaintingStyle.stroke);
+    canvas.drawRRect(rect, Paint()..color = color.withValues(alpha: 0.5)..strokeWidth = 2..style = PaintingStyle.stroke);
   }
 
   @override
-  bool shouldRepaint(_WaterTubePainter old) =>
-      old.fill != fill || old.color != color;
+  bool shouldRepaint(_WaterTubePainter old) => old.fill != fill || old.color != color;
 }
 
 // ─── Live activity list ───────────────────────────────────────────────────────
@@ -716,19 +680,14 @@ class _LiveActivityList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tempColor  = data.alerts.tempCritical
-        ? AppColors.red
-        : data.alerts.tempWarning
-            ? AppColors.orange
-            : AppColors.emerald;
-    final waterColor =
-        data.alerts.waterHigh ? AppColors.red : AppColors.sky;
+    final tempColor  = data.alerts.tempCritical ? AppColors.red : data.alerts.tempWarning ? AppColors.orange : AppColors.emerald;
+    final waterColor = data.alerts.waterHigh ? AppColors.red : AppColors.sky;
 
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color:        AppColors.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
+        border:       Border.all(color: AppColors.border),
       ),
       child: Column(children: [
         ActivityListItem(
@@ -748,15 +707,11 @@ class _LiveActivityList extends StatelessWidget {
         ),
         const Divider(color: AppColors.border, height: 1),
         ActivityListItem(
-          icon: data.alerts.waterHigh
-              ? Icons.water_damage
-              : Icons.water,
+          icon:        data.alerts.waterHigh ? Icons.water_damage : Icons.water,
           iconColor:   waterColor,
           iconBgColor: waterColor.withValues(alpha: 0.1),
-          title:
-              'Niveau eau : ${data.waterLevelPercent.toStringAsFixed(0)}% '
-              '(ADC: ${data.waterLevelRaw})',
-          subtitle: '${data.deviceId} · ${data.lastUpdatedText}',
+          title:       'Niveau eau : ${data.waterLevelPercent.toStringAsFixed(0)}% (ADC: ${data.waterLevelRaw})',
+          subtitle:    '${data.deviceId} · ${data.lastUpdatedText}',
         ),
       ]),
     );

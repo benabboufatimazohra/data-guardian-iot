@@ -1,207 +1,312 @@
-# datagard.ino — MicroPython + Explainable AI (on-device, no cloud)
-# Flash: esptool erase_flash → write esp8266 firmware → mpremote cp datagard.ino :main.py
+/*
+ * datagard.ino — DataGuardian : capteur IoT avec IA explicable (XAI) embarquée
+ * Portage MicroPython -> Arduino C++ pour ESP8266
+ *
+ * Bibliothèques requises (Gestionnaire de bibliothèques de l'IDE Arduino) :
+ *   - Cartes ESP8266 (fournit ESP8266WiFi.h et ESP8266WebServer.h)
+ *   - "DHT sensor library" par Adafruit
+ *   - "Adafruit Unified Sensor" (dépendance de la lib DHT)
+ *   - "ArduinoJson" (version 6.x, ex : 6.21.x)
+ *
+ * Câblage (identique au script d'origine) :
+ *   - DHT11 : D4  (GPIO2)
+ *   - Fuite d'eau : D5 (GPIO14), entrée numérique
+ *
+ * Flash : IDE Arduino -> Outils -> Carte : "Generic ESP8266 Module" (ou NodeMCU 1.0)
+ *         -> sélectionner le bon port -> Téléverser
+ */
 
-import gc, time, math, socket, network, ujson
-from machine import Pin
-import dht
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <ArduinoJson.h>
+#include <DHT.h>
+#include <math.h>
 
-# ── Config ────────────────────────────────────────────────────────────
-SSID          = "***REMOVED***"
-WIFI_PASSWORD = "***REMOVED***"
-DEVICE_ID     = "ESP8266-01"
+// ── Config ────────────────────────────────────────────────────────────
+const char* SSID          = "***REMOVED***";
+const char* WIFI_PASSWORD = "***REMOVED***";
+const char* DEVICE_ID     = "ESP8266-01";
 
-TEMP_WARNING  = 32.0
-TEMP_CRITICAL = 38.0
-HUM_LOW       = 20.0
-HUM_HIGH      = 80.0
+const float TEMP_WARNING  = 32.0;
+const float TEMP_CRITICAL = 38.0;
+const float HUM_LOW       = 20.0;
+const float HUM_HIGH      = 80.0;
 
-# ── Capteurs ──────────────────────────────────────────────────────────
-sensor = dht.DHT11(Pin(2))   # D4
-water  = Pin(14, Pin.IN)     # D5
+// ── Capteurs ──────────────────────────────────────────────────────────
+#define DHTPIN   2      // D4
+#define DHTTYPE  DHT11
+#define WATERPIN 14     // D5
 
-# ═════════════════════════════════════════════════════════════════════
-#  EXPLAINABLE AI — fenêtre glissante de 5 mesures
-#  Calcule: tendance, score de risque, explication textuelle
-# ═════════════════════════════════════════════════════════════════════
+DHT dht(DHTPIN, DHTTYPE);
+ESP8266WebServer server(80);
 
-WINDOW = 5  # nombre de mesures gardées en mémoire (~60 octets RAM)
+// ═════════════════════════════════════════════════════════════════════
+//  EXPLAINABLE AI — fenêtre glissante de 5 mesures
+//  Calcule : tendance, score de risque, explication textuelle
+// ═════════════════════════════════════════════════════════════════════
 
-_buf_t = []   # historique températures
-_buf_h = []   # historique humidités
+const int WINDOW = 5;   // nombre de mesures gardées en mémoire
 
-def _push(buf, val):
-    buf.append(val)
-    if len(buf) > WINDOW:
-        buf.pop(0)
+float bufT[WINDOW];     // historique températures
+float bufH[WINDOW];     // historique humidités
+int   bufTLen = 0;
+int   bufHLen = 0;
 
-def _trend(buf):
-    """Pente linéaire simple (dernier - premier) / n  →  °C ou % par cycle."""
-    if len(buf) < 2:
-        return 0.0
-    return (buf[-1] - buf[0]) / len(buf)
+void pushBuf(float* buf, int &len, float val) {
+  if (len < WINDOW) {
+    buf[len++] = val;
+  } else {
+    for (int i = 1; i < WINDOW; i++) buf[i - 1] = buf[i];
+    buf[WINDOW - 1] = val;
+  }
+}
 
-def _mean(buf):
-    return sum(buf) / len(buf) if buf else 0.0
+// Pente linéaire simple (dernier - premier) / n  →  °C ou % par cycle.
+float trendOf(float* buf, int len) {
+  if (len < 2) return 0.0;
+  return (buf[len - 1] - buf[0]) / len;
+}
 
-def _zscore(val, buf):
-    """Écart à la moyenne en unités d'écart-type (≥2 = anomalie)."""
-    if len(buf) < 2:
-        return 0.0
-    m = _mean(buf)
-    s = math.sqrt(sum((x - m) ** 2 for x in buf) / len(buf))
-    return (val - m) / s if s > 0 else 0.0
+float meanOf(float* buf, int len) {
+  if (len == 0) return 0.0;
+  float s = 0;
+  for (int i = 0; i < len; i++) s += buf[i];
+  return s / len;
+}
 
-def _norm(val, lo, hi):
-    """Normalise val dans [lo, hi] → 0.0–1.0, clampé."""
-    if hi == lo:
-        return 0.0
-    return max(0.0, min(1.0, (val - lo) / (hi - lo)))
+// Écart à la moyenne en unités d'écart-type (≥2 = anomalie).
+float zscoreOf(float val, float* buf, int len) {
+  if (len < 2) return 0.0;
+  float m = meanOf(buf, len);
+  float sq = 0;
+  for (int i = 0; i < len; i++) sq += (buf[i] - m) * (buf[i] - m);
+  float s = sqrt(sq / len);
+  return s > 0 ? (val - m) / s : 0.0;
+}
 
-# ── Score de risque (0.0 = ok, 1.0 = critique) ────────────────────────
-# Poids: température 50%, humidité 30%, eau 20%
-def risk_score(t, h, w, trend_t, trend_h):
-    s_t = _norm(t, TEMP_WARNING, TEMP_CRITICAL + 4)   # temp
-    s_h = max(_norm(HUM_LOW + 5, h, HUM_LOW),         # hum basse
-               _norm(h, HUM_HIGH - 5, HUM_HIGH + 10)) # hum haute
-    s_w = 1.0 if w else 0.0                            # eau
-    s_tt = _norm(trend_t, 0, 2.0)                      # tendance montante temp
-    score = 0.40 * s_t + 0.20 * s_h + 0.20 * s_w + 0.20 * s_tt
-    return round(min(score, 1.0), 2)
+// Normalise val dans [lo, hi] → 0.0–1.0, clampé.
+float normVal(float val, float lo, float hi) {
+  if (hi == lo) return 0.0;
+  float r = (val - lo) / (hi - lo);
+  if (r < 0.0) r = 0.0;
+  if (r > 1.0) r = 1.0;
+  return r;
+}
 
-# ── Génération de l'explication (texte court, ~80 chars max) ──────────
-def explain(t, h, w, trend_t, trend_h, score):
-    parts = []
+// ── Score de risque (0.0 = ok, 1.0 = critique) ────────────────────────
+// Poids : température 40%, humidité 20%, eau 20%, tendance 20%
+float riskScore(float t, float h, int w, float trendT, float trendH) {
+  float sT  = normVal(t, TEMP_WARNING, TEMP_CRITICAL + 4);      // temp
+  float sH1 = normVal(HUM_LOW + 5, h, HUM_LOW);                 // hum basse
+  float sH2 = normVal(h, HUM_HIGH - 5, HUM_HIGH + 10);          // hum haute
+  float sH  = max(sH1, sH2);
+  float sW  = w ? 1.0 : 0.0;                                     // eau
+  float sTT = normVal(trendT, 0, 2.0);                          // tendance temp
+  float score = 0.40 * sT + 0.20 * sH + 0.20 * sW + 0.20 * sTT;
+  if (score > 1.0) score = 1.0;
+  return roundf(score * 100.0) / 100.0;
+}
 
-    # Température
-    if t > TEMP_CRITICAL:
-        parts.append("T={}C CRITIQUE (+{}C/seuil)".format(t, round(t - TEMP_CRITICAL, 1)))
-    elif t > TEMP_WARNING:
-        parts.append("T={}C avertissement".format(t))
-    if trend_t > 0.5:
-        parts.append("hausse +{}C/cycle".format(round(trend_t, 1)))
-    elif trend_t < -0.5:
-        parts.append("baisse {}C/cycle".format(round(trend_t, 1)))
+struct XAIResult {
+  float  score;
+  String level;
+  String reason;
+};
 
-    # Humidité
-    if h < HUM_LOW:
-        parts.append("H={}% trop sec".format(h))
-    elif h > HUM_HIGH:
-        parts.append("H={}% trop humide".format(h))
+// Prototypes explicites (obligatoires) : l'IDE Arduino génère automatiquement
+// des prototypes pour toutes les fonctions et les insère tout en haut du
+// fichier, AVANT la définition de la struct ci-dessus, ce qui casse la
+// compilation ("XAIResult does not name a type"). En les déclarant ici
+// nous-mêmes, l'IDE ne réinsère pas les siens.
+XAIResult explainXAI(float t, float h, int w, float trendT, float trendH, float score);
+XAIResult computeXAI(float t, float h, int w);
 
-    # Eau
-    if w:
-        parts.append("FUITE detectee")
+// Formate un float avec 1 décimale (ex : 32.4)
+String fmt1(float v) {
+  char buf[12];
+  dtostrf(v, 0, 1, buf);
+  return String(buf);
+}
 
-    # Corrélation multi-facteurs
-    if t > TEMP_WARNING and h > 70:
-        parts.append("T+H elevees=risque condensation")
+// Formate un float avec 2 décimales (ex : 0.72), pour le score
+String fmt2(float v) {
+  char buf[12];
+  dtostrf(v, 0, 2, buf);
+  return String(buf);
+}
 
-    if not parts:
-        parts.append("parametres normaux")
+// ── Génération de l'explication (texte court) ─────────────────────────
+XAIResult explainXAI(float t, float h, int w, float trendT, float trendH, float score) {
+  String parts = "";
+  bool first = true;
+  auto addPart = [&](String p) {
+    if (!first) parts += ", ";
+    parts += p;
+    first = false;
+  };
 
-    level = "critique" if score >= 0.7 else "warning" if score >= 0.4 else "ok"
-    return {"score": score, "level": level, "reason": ", ".join(parts)}
+  // Température
+  if (t > TEMP_CRITICAL) {
+    addPart("T=" + fmt1(t) + "C CRITIQUE (+" + fmt1(t - TEMP_CRITICAL) + "C/seuil)");
+  } else if (t > TEMP_WARNING) {
+    addPart("T=" + fmt1(t) + "C avertissement");
+  }
+  if (trendT > 0.5) {
+    addPart("hausse +" + fmt1(trendT) + "C/cycle");
+  } else if (trendT < -0.5) {
+    addPart("baisse " + fmt1(trendT) + "C/cycle");
+  }
 
-# ── Mise à jour fenêtre + calcul XAI ──────────────────────────────────
-def compute_xai(t, h, w):
-    _push(_buf_t, t)
-    _push(_buf_h, h)
-    trend_t = _trend(_buf_t)
-    trend_h = _trend(_buf_h)
-    score   = risk_score(t, h, w, trend_t, trend_h)
-    return explain(t, h, w, trend_t, trend_h, score)
+  // Humidité
+  if (h < HUM_LOW) {
+    addPart("H=" + fmt1(h) + "% trop sec");
+  } else if (h > HUM_HIGH) {
+    addPart("H=" + fmt1(h) + "% trop humide");
+  }
 
-# ═════════════════════════════════════════════════════════════════════
+  // Eau
+  if (w) {
+    addPart("FUITE detectee");
+  }
 
-# ── Lecture capteurs ──────────────────────────────────────────────────
-_last = {"t": 0.0, "h": 0.0, "w": 0}
+  // Corrélation multi-facteurs
+  if (t > TEMP_WARNING && h > 70) {
+    addPart("T+H elevees=risque condensation");
+  }
 
-def read():
-    try:
-        sensor.measure()
-        _last["t"] = sensor.temperature()
-        _last["h"] = sensor.humidity()
-    except:
-        pass
-    _last["w"] = water.value()
-    return _last["t"], _last["h"], _last["w"]
+  if (first) {
+    addPart("parametres normaux");
+  }
 
-# ── WiFi ──────────────────────────────────────────────────────────────
-def connect_wifi():
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-    if not wlan.isconnected():
-        wlan.connect(SSID, WIFI_PASSWORD)
-        for _ in range(40):
-            if wlan.isconnected(): break
-            time.sleep(0.5)
-    print("WiFi:", wlan.ifconfig()[0])
+  XAIResult res;
+  res.score  = score;
+  res.level  = score >= 0.7 ? "critique" : (score >= 0.4 ? "warning" : "ok");
+  res.reason = parts;
+  return res;
+}
 
-# ── Réponses HTTP ──────────────────────────────────────────────────────
-_JSON_HDR = (b"HTTP/1.1 200 OK\r\n"
-             b"Content-Type: application/json\r\n"
-             b"Access-Control-Allow-Origin: *\r\n\r\n")
+// ── Mise à jour fenêtre + calcul XAI ──────────────────────────────────
+XAIResult computeXAI(float t, float h, int w) {
+  pushBuf(bufT, bufTLen, t);
+  pushBuf(bufH, bufHLen, h);
+  float trendT = trendOf(bufT, bufTLen);
+  float trendH = trendOf(bufH, bufHLen);
+  float score  = riskScore(t, h, w, trendT, trendH);
+  return explainXAI(t, h, w, trendT, trendH, score);
+}
 
-def handle(conn):
-    try:
-        path = conn.recv(256).decode("utf-8", "ignore").split(" ")[1]
-    except:
-        conn.close(); return
+// ═════════════════════════════════════════════════════════════════════
 
-    t, h, w = read()
-    xai     = compute_xai(t, h, w)
+// ── Lecture capteurs ──────────────────────────────────────────────────
+float lastT = 0.0, lastH = 0.0;
+int   lastW = 0;
 
-    if path == "/data":
-        body = ujson.dumps({
-            "temperature": t,
-            "humidity":    h,
-            "water_leak":  bool(w),
-            "device_id":   DEVICE_ID,
-            "alerts": {
-                "temp_critical": t > TEMP_CRITICAL,
-                "temp_warning":  t > TEMP_WARNING,
-                "humidity_low":  h < HUM_LOW,
-                "humidity_high": h > HUM_HIGH,
-                "water_high":    bool(w),
-            },
-            "xai": xai,   # {"score":0.72, "level":"warning", "reason":"..."}
-        })
-        conn.sendall(_JSON_HDR + body.encode())
+void readSensors(float &t, float &h, int &w) {
+  float nt = dht.readTemperature();
+  float nh = dht.readHumidity();
+  if (!isnan(nt)) lastT = nt;
+  if (!isnan(nh)) lastH = nh;
+  lastW = digitalRead(WATERPIN);
+  t = lastT; h = lastH; w = lastW;
+}
 
-    elif path == "/health":
-        conn.sendall(_JSON_HDR + b'{"status":"ok"}')
+// ── WiFi ──────────────────────────────────────────────────────────────
+void connectWiFi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(SSID, WIFI_PASSWORD);
+  int tries = 0;
+  while (WiFi.status() != WL_CONNECTED && tries < 40) {
+    delay(500);
+    tries++;
+  }
+  Serial.print("WiFi: ");
+  Serial.println(WiFi.localIP());
+}
 
-    elif path == "/xai":
-        conn.sendall(_JSON_HDR + ujson.dumps(xai).encode())
+// ── Réponses HTTP ────────────────────────────────────────────────────
+void handleData() {
+  float t, h; int w;
+  readSensors(t, h, w);
+  XAIResult xai = computeXAI(t, h, w);
 
-    else:
-        conn.sendall(
-            b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
-            + ("<h2>DataGuardian XAI</h2>"
-               "<p>T:{} H:{} Eau:{}</p>"
-               "<p>Score: <b>{}</b> [{}]</p>"
-               "<p>{}</p>"
-               "<a href='/data'>/data</a> &nbsp; <a href='/xai'>/xai</a>".format(
-                   t, h, "OUI" if w else "non",
-                   xai["score"], xai["level"], xai["reason"]
-               )).encode()
-        )
+  StaticJsonDocument<512> doc;
+  doc["temperature"] = t;
+  doc["humidity"]    = h;
+  doc["water_leak"]  = (bool)w;
+  doc["device_id"]   = DEVICE_ID;
 
-    conn.close()
-    gc.collect()
+  JsonObject alerts = doc.createNestedObject("alerts");
+  alerts["temp_critical"] = t > TEMP_CRITICAL;
+  alerts["temp_warning"]  = t > TEMP_WARNING;
+  alerts["humidity_low"]  = h < HUM_LOW;
+  alerts["humidity_high"] = h > HUM_HIGH;
+  alerts["water_high"]    = (bool)w;
 
-# ── Main ──────────────────────────────────────────────────────────────
-connect_wifi()
-srv = socket.socket()
-srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-srv.bind(("", 80))
-srv.listen(3)
-print("Serveur pret.")
+  JsonObject xaiObj = doc.createNestedObject("xai");
+  xaiObj["score"]  = xai.score;
+  xaiObj["level"]  = xai.level;
+  xaiObj["reason"] = xai.reason;
 
-while True:
-    try:
-        conn, _ = srv.accept()
-        handle(conn)
-    except Exception as e:
-        print("err:", e)
-        gc.collect()
+  String body;
+  serializeJson(doc, body);
+
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "application/json", body);
+}
+
+void handleXai() {
+  float t, h; int w;
+  readSensors(t, h, w);
+  XAIResult xai = computeXAI(t, h, w);
+
+  StaticJsonDocument<256> doc;
+  doc["score"]  = xai.score;
+  doc["level"]  = xai.level;
+  doc["reason"] = xai.reason;
+
+  String body;
+  serializeJson(doc, body);
+
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "application/json", body);
+}
+
+void handleHealth() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
+void handleRoot() {
+  float t, h; int w;
+  readSensors(t, h, w);
+  XAIResult xai = computeXAI(t, h, w);
+
+  String html = "<h2>DataGuardian XAI</h2>";
+  html += "<p>T:" + fmt1(t) + " H:" + fmt1(h) + " Eau:" + (w ? "OUI" : "non") + "</p>";
+  html += "<p>Score: <b>" + fmt2(xai.score) + "</b> [" + xai.level + "]</p>";
+  html += "<p>" + xai.reason + "</p>";
+  html += "<a href='/data'>/data</a> &nbsp; <a href='/xai'>/xai</a>";
+
+  server.send(200, "text/html", html);
+}
+
+// ── Main ──────────────────────────────────────────────────────────────
+void setup() {
+  Serial.begin(115200);
+  pinMode(WATERPIN, INPUT);
+  dht.begin();
+
+  connectWiFi();
+
+  server.on("/",       handleRoot);
+  server.on("/data",   handleData);
+  server.on("/xai",    handleXai);
+  server.on("/health", handleHealth);
+  server.begin();
+
+  Serial.println("Serveur pret.");
+}
+
+void loop() {
+  server.handleClient();
+}

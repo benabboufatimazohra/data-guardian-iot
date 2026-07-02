@@ -1,17 +1,28 @@
 // lib/screens/alerts_screen.dart
 //
-// ISSUE 1 FIX: "Dismiss" on AlertCard removes alert from local UI list only.
-//   It does NOT call DatabaseHelper.resolveAlert() — resolution is automatic
-//   when sensor values return to normal (handled by AlertService).
-//
-// ISSUE 2 FIX: _ExplainBottomSheet now receives a XaiData object and displays
-//   the real ESP-generated explanation. No hardcoded text remains.
+// CHANGES:
+//   1. Removed the 3 hardcoded placeholder alerts (UI-only mock data).
+//      Alerts now come exclusively from DatabaseHelper, which is populated
+//      by AlertService.evaluate() on every ESP poll.
+//   2. Added a subscription to EspService.dataStream so the list refreshes
+//      automatically right after each poll — no manual pull-to-refresh
+//      needed to see a brand-new alert appear.
+//   3. _dismissAlert still only removes the alert from the local UI list
+//      (NOT from SQLite) — resolution remains sensor-driven only, exactly
+//      as AlertService intends. If the condition is still active on the
+//      next poll, the alert will simply reappear (which is correct: it's
+//      still a real, ongoing problem).
+//   4. _explainAlert still uses EspService.instance.lastXai — the most
+//      recent explanation payload received from the ESP8266 firmware.
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../models/models.dart';
 import '../widgets/widgets.dart';
 import '../services/esp_service.dart';
+import '../services/auth_service.dart';
+import '../database/database_helper.dart';
 
 class AlertsScreen extends StatefulWidget {
   const AlertsScreen({super.key});
@@ -22,35 +33,12 @@ class AlertsScreen extends StatefulWidget {
 
 class _AlertsScreenState extends State<AlertsScreen> {
   int  _selectedTab = 0;
-  bool _isLoading   = false;
+  bool _isLoading   = true;
 
-  final List<AlertModel> _allAlerts = [
-    AlertModel(
-      id:        '1',
-      severity:  AlertSeverity.critical,
-      title:     'High Temperature Detected - 35.2°C',
-      deviceId:  'ESP8266-01',
-      location:  'Rack A-04',
-      timestamp: DateTime.now().subtract(const Duration(minutes: 2)),
-    ),
-    AlertModel(
-      id:        '2',
-      severity:  AlertSeverity.warning,
-      title:     'Humidity Threshold Near',
-      deviceId:  'ESP8266-04',
-      location:  'Rack C-12',
-      timestamp: DateTime.now().subtract(const Duration(minutes: 15)),
-    ),
-    AlertModel(
-      id:        '3',
-      severity:  AlertSeverity.info,
-      title:     'Network Latency Spike Resolved',
-      deviceId:  'Gateway-02',
-      location:  'Node Gateway-02',
-      timestamp: DateTime.now().subtract(const Duration(hours: 2)),
-      isResolved: true,
-    ),
-  ];
+  // ── Real alerts only — populated from SQLite via DatabaseHelper ───────────
+  List<AlertModel> _allAlerts = [];
+
+  StreamSubscription<EnvironmentData>? _dataSub;
 
   List<AlertModel> get _filteredAlerts {
     switch (_selectedTab) {
@@ -61,28 +49,68 @@ class _AlertsScreenState extends State<AlertsScreen> {
     }
   }
 
+  String get _espId =>
+      AuthService.instance.currentUser?.assignedEspId ?? 'ESP8266-01';
+
   @override
   void initState() {
     super.initState();
     _fetchAlerts();
+
+    // Auto-refresh the alert list every time a new ESP reading comes in.
+    // AlertService.evaluate() (triggered by EspService on each poll) is what
+    // actually writes/resolves rows in SQLite — we just re-read after it runs.
+    _dataSub = EspService.instance.dataStream.listen((_) {
+      if (mounted) _fetchAlerts(showSpinner: false);
+    });
   }
 
-  Future<void> _fetchAlerts() async {
-    setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 300));
-    setState(() => _isLoading = false);
+  @override
+  void dispose() {
+    _dataSub?.cancel();
+    super.dispose();
+  }
+
+  // ── Loads active + recently resolved alerts from SQLite ───────────────────
+  Future<void> _fetchAlerts({bool showSpinner = true}) async {
+    if (showSpinner) setState(() => _isLoading = true);
+
+    try {
+      final espId = _espId;
+
+      // Currently unresolved (ongoing) alerts
+      final active = await DatabaseHelper.instance.getActiveAlerts(espId);
+
+      // Resolved alerts from the last 24h, for the "Earlier Today" / "Resolved" tab
+      final from = DateTime.now().subtract(const Duration(hours: 24));
+      final recent = await DatabaseHelper.instance.getAlertsForExport(
+        espId: espId,
+        from:  from,
+        to:    DateTime.now(),
+      );
+      final resolved = recent.where((a) => a.isResolved).toList();
+
+      if (mounted) {
+        setState(() {
+          _allAlerts = [...active, ...resolved];
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   // ── Dismiss removes from local UI list only ───────────────────────────────
-  // Does NOT resolve the alert in SQLite.
-  // The alert will remain active in the DB until the sensor returns to normal.
+  // Does NOT resolve the alert in SQLite. If the underlying condition is
+  // still active, it will simply reappear on the next ESP poll — which is
+  // the correct behaviour, since resolution must remain sensor-driven.
   void _dismissAlert(String alertId) {
     setState(() => _allAlerts.removeWhere((a) => a.id == alertId));
   }
 
   // ── Explain: fetch latest XAI from EspService and show bottom sheet ────────
   void _explainAlert(AlertModel alert) {
-    // Get the most recent XAI data received from the ESP
     final xai = EspService.instance.lastXai;
 
     showModalBottomSheet(
@@ -388,12 +416,11 @@ class _BlinkingDotState extends State<_BlinkingDot>
 // ─────────────────────────────────────────────────────────────────────────────
 // _ExplainBottomSheet
 //
-// ISSUE 2 FIX:
-//   Now receives a XaiData object. All hardcoded text has been removed.
-//   Displays:
-//     • Risk Score (xai.score as percentage bar)
-//     • Level (xai.levelDisplay)
-//     • Reason (xai.reason — generated by ESP firmware)
+// Displays the real ESP-generated explanation:
+//   • Risk Score (xai.score as percentage bar)
+//   • Level (xai.levelDisplay)
+//   • Reason (xai.reason — generated by ESP firmware, e.g. "T=34C
+//     avertissement, hausse +1.2C/cycle")
 // ─────────────────────────────────────────────────────────────────────────────
 class _ExplainBottomSheet extends StatelessWidget {
   final AlertModel alert;

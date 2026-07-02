@@ -1,35 +1,17 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+import '../services/auth_service.dart';
+import '../database/database_helper.dart';
 
 /// ─────────────────────────────────────────────────────────────────────────────
 /// SCREEN 1: LoginScreen
 /// ─────────────────────────────────────────────────────────────────────────────
-///
-/// WIDGET TREE:
-/// Scaffold
-/// └── Stack (for background pattern + centered content)
-///     ├── _TechPatternBackground  ← decorative dot pattern
-///     └── SafeArea
-///         └── Column
-///             ├── _BrandHeader          ← top-left logo
-///             └── Center
-///                 └── SingleChildScrollView
-///                     └── _LoginCard    ← the white glass card
-///                         ├── _LockIcon
-///                         ├── _TitleSection
-///                         ├── _LoginForm
-///                         ├── _SsoSection
-///                         └── _FooterLinks
-///
-/// KEY CONCEPT — StatefulWidget vs StatelessWidget:
-///   We use StatefulWidget here because the form has STATE:
-///   - Is the password visible? (bool _passwordVisible)
-///   - Is the form loading? (bool _isLoading)
-///   When these values change, Flutter re-renders only the affected widgets.
-///
-///   HTML equivalent: you'd use JS variables + event listeners to update the DOM.
-///   Flutter's setState() is like calling document.querySelector().style = ...
-///   but Flutter re-renders only the changed widget, not the whole page.
+/// OVERFLOW FIX (1.2 px RIGHT):
+///   The _BrandHeader Row used mainAxisAlignment.spaceBetween with two
+///   unconstrained RichText children. On screens ≈ 361–370 px wide the sum
+///   of their natural widths exceeded the available row width by ~1 px.
+///   Fix: wrap both children in Flexible so they can shrink and RichText
+///   gets overflow: TextOverflow.ellipsis as a safety net.
 /// ─────────────────────────────────────────────────────────────────────────────
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -39,15 +21,13 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  /// STATE VARIABLES — these cause re-renders when changed via setState()
-  final _emailController = TextEditingController();
+  final _emailController    = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _passwordVisible = false;
-  bool _rememberDevice = false;
-  bool _isLoading = false;
+  bool   _passwordVisible = false;
+  bool   _rememberDevice  = false;
+  bool   _isLoading       = false;
+  String? _errorMessage;
 
-  /// Don't forget to dispose controllers to avoid memory leaks!
-  /// HTML doesn't need this because the browser cleans up form elements.
   @override
   void dispose() {
     _emailController.dispose();
@@ -55,36 +35,26 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  /// WHERE THE API CALL GOES:
-  /// When the user taps "Sign In", we:
-  ///  1. Show a loading indicator (setState → _isLoading = true)
-  ///  2. Call the auth API
-  ///  3. On success, navigate to Dashboard
-  ///  4. On error, show a Snackbar
   Future<void> _handleSignIn() async {
-    setState(() => _isLoading = true);
+    setState(() { _isLoading = true; _errorMessage = null; });
 
-    // ─── API call would go here ───────────────────────────────────────────
-    // Example:
-    // final response = await AuthService.login(
-    //   email: _emailController.text,
-    //   password: _passwordController.text,
-    // );
-    // if (response.success) {
-    //   Navigator.pushReplacementNamed(context, '/dashboard');
-    // } else {
-    //   ScaffoldMessenger.of(context).showSnackBar(
-    //     SnackBar(content: Text(response.error)),
-    //   );
-    // }
-    // ─────────────────────────────────────────────────────────────────────
+    final email    = _emailController.text.trim();
+    final password = _passwordController.text;
 
-    // Simulate network delay for now
-    await Future.delayed(const Duration(seconds: 1));
+    if (email.isEmpty || password.isEmpty) {
+      setState(() { _isLoading = false; _errorMessage = 'Veuillez remplir tous les champs.'; });
+      return;
+    }
 
-    if (mounted) {
-      setState(() => _isLoading = false);
+    final success = await AuthService.instance.login(email, password);
+
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+
+    if (success) {
       Navigator.pushReplacementNamed(context, '/dashboard');
+    } else {
+      setState(() => _errorMessage = 'Email ou mot de passe incorrect.');
     }
   }
 
@@ -92,37 +62,26 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.backgroundDark,
-
-      /// Stack layers widgets on top of each other.
-      /// HTML equivalent: position: relative parent + position: absolute children
       body: Stack(
         children: [
-          /// Layer 1: Dot grid background pattern
-          /// HTML: background-image: radial-gradient(circle at 2px 2px, ...)
           const _TechPatternBackground(),
-
-          /// Layer 2: Main content
-          /// SafeArea prevents content from going under the status bar or notch
           SafeArea(
             child: Column(
               children: [
-                /// Top branding bar
-                /// HTML: <div class="absolute top-0 left-0 ...">
                 _BrandHeader(),
-
-                /// Center the login card vertically in remaining space
                 Expanded(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                     child: _LoginCard(
-                      emailController: _emailController,
+                      emailController:    _emailController,
                       passwordController: _passwordController,
-                      passwordVisible: _passwordVisible,
-                      rememberDevice: _rememberDevice,
-                      isLoading: _isLoading,
-                      onTogglePassword: () => setState(() => _passwordVisible = !_passwordVisible),
-                      onToggleRemember: (val) => setState(() => _rememberDevice = val ?? false),
-                      onSignIn: _handleSignIn,
+                      passwordVisible:    _passwordVisible,
+                      rememberDevice:     _rememberDevice,
+                      isLoading:          _isLoading,
+                      errorMessage:       _errorMessage,
+                      onTogglePassword:   () => setState(() => _passwordVisible = !_passwordVisible),
+                      onToggleRemember:   (val) => setState(() => _rememberDevice = val ?? false),
+                      onSignIn:           _handleSignIn,
                     ),
                   ),
                 ),
@@ -136,8 +95,7 @@ class _LoginScreenState extends State<LoginScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Sub-widget: _TechPatternBackground
-// HTML: background-image: radial-gradient dot pattern
+// _TechPatternBackground
 // ─────────────────────────────────────────────────────────────────────────────
 class _TechPatternBackground extends StatelessWidget {
   const _TechPatternBackground();
@@ -157,7 +115,7 @@ class _DotGridPainter extends CustomPainter {
       ..color = AppColors.primary.withValues(alpha: 0.05)
       ..style = PaintingStyle.fill;
 
-    const spacing = 32.0;
+    const spacing   = 32.0;
     const dotRadius = 1.0;
 
     for (double x = 0; x < size.width; x += spacing) {
@@ -172,8 +130,7 @@ class _DotGridPainter extends CustomPainter {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Sub-widget: _BrandHeader
-// HTML: <div class="absolute top-0 left-0 w-full flex justify-between p-6">
+// _BrandHeader — OVERFLOW FIX APPLIED HERE
 // ─────────────────────────────────────────────────────────────────────────────
 class _BrandHeader extends StatelessWidget {
   @override
@@ -181,47 +138,53 @@ class _BrandHeader extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
       child: Row(
-        /// HTML: justify-between = MainAxisAlignment.spaceBetween
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          /// Logo + App name
-          Row(
-            children: [
-              const Icon(Icons.shield_outlined, color: AppColors.primary, size: 28),
-              const SizedBox(width: 8),
-              RichText(
-                /// RichText lets us mix styles in one line
-                /// HTML: DataGuardian <span class="text-primary">IoT</span>
-                text: const TextSpan(
-                  text: 'DataGuardian ',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary,
+          // ── FIX: wrap in Flexible so it can shrink on narrow screens ──────
+          Flexible(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.shield_outlined, color: AppColors.primary, size: 28),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: RichText(
+                    overflow: TextOverflow.ellipsis, // safety net
+                    text: const TextSpan(
+                      text: 'DataGuardian ',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                      ),
+                      children: [
+                        TextSpan(
+                          text: 'IoT',
+                          style: TextStyle(color: AppColors.primary),
+                        ),
+                      ],
+                    ),
                   ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── FIX: wrap status badge in Flexible too ────────────────────────
+          if (MediaQuery.of(context).size.width > 360)
+            Flexible(
+              child: RichText(
+                overflow: TextOverflow.ellipsis,
+                text: const TextSpan(
+                  text: 'Statut : ',
+                  style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
                   children: [
                     TextSpan(
-                      text: 'IoT',
-                      style: TextStyle(color: AppColors.primary),
+                      text: 'Opérationnel',
+                      style: TextStyle(color: AppColors.emerald),
                     ),
                   ],
                 ),
-              ),
-            ],
-          ),
-
-          /// System status badge — hidden on small screens via MediaQuery
-          if (MediaQuery.of(context).size.width > 360)
-            RichText(
-              text: const TextSpan(
-                text: 'System Status: ',
-                style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
-                children: [
-                  TextSpan(
-                    text: 'Operational',
-                    style: TextStyle(color: AppColors.emerald),
-                  ),
-                ],
               ),
             ),
         ],
@@ -231,18 +194,18 @@ class _BrandHeader extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Sub-widget: _LoginCard (the glass card container)
-// HTML: <div class="w-full max-w-md bg-white/5 backdrop-blur-xl border rounded-xl">
+// _LoginCard
 // ─────────────────────────────────────────────────────────────────────────────
 class _LoginCard extends StatelessWidget {
   final TextEditingController emailController;
   final TextEditingController passwordController;
-  final bool passwordVisible;
-  final bool rememberDevice;
-  final bool isLoading;
-  final VoidCallback onTogglePassword;
-  final ValueChanged<bool?> onToggleRemember;
-  final VoidCallback onSignIn;
+  final bool    passwordVisible;
+  final bool    rememberDevice;
+  final bool    isLoading;
+  final String? errorMessage;
+  final VoidCallback         onTogglePassword;
+  final ValueChanged<bool?>  onToggleRemember;
+  final VoidCallback         onSignIn;
 
   const _LoginCard({
     required this.emailController,
@@ -250,6 +213,7 @@ class _LoginCard extends StatelessWidget {
     required this.passwordVisible,
     required this.rememberDevice,
     required this.isLoading,
+    this.errorMessage,
     required this.onTogglePassword,
     required this.onToggleRemember,
     required this.onSignIn,
@@ -258,29 +222,24 @@ class _LoginCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      /// Max width like HTML's max-w-md (448px)
       constraints: const BoxConstraints(maxWidth: 448),
-      padding: const EdgeInsets.all(32),
+      padding:     const EdgeInsets.all(32),
       decoration: BoxDecoration(
-        /// HTML: bg-white/5 backdrop-blur-xl = glassmorphism effect
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+        color:         Colors.white.withValues(alpha: 0.05),
+        borderRadius:  BorderRadius.circular(16),
+        border:        Border.all(color: Colors.white.withValues(alpha: 0.1)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.4),
+            color:     Colors.black.withValues(alpha: 0.4),
             blurRadius: 40,
-            offset: const Offset(0, 20),
+            offset:    const Offset(0, 20),
           ),
         ],
       ),
       child: Column(
         children: [
-          /// Lock icon hero section
           _LockIconSection(),
           const SizedBox(height: 24),
-
-          /// Title
           const Text('Secure Access', style: AppTextStyles.heading),
           const SizedBox(height: 8),
           const Text(
@@ -290,42 +249,61 @@ class _LoginCard extends StatelessWidget {
           ),
           const SizedBox(height: 32),
 
-          /// Email field
           _InputField(
-            label: 'Work Email',
-            hint: 'name@company.com',
-            controller: emailController,
-            prefixIcon: Icons.alternate_email,
+            label:        'Work Email',
+            hint:         'name@company.com',
+            controller:   emailController,
+            prefixIcon:   Icons.alternate_email,
             keyboardType: TextInputType.emailAddress,
           ),
           const SizedBox(height: 20),
 
-          /// Password field
           _PasswordField(
             controller: passwordController,
-            isVisible: passwordVisible,
-            onToggle: onTogglePassword,
+            isVisible:  passwordVisible,
+            onToggle:   onTogglePassword,
           ),
           const SizedBox(height: 16),
 
-          /// Remember checkbox
+          // ── OVERFLOW FIX: Expanded on Text prevents 1.2px right overflow ──
           Row(
             children: [
               Checkbox(
-                value: rememberDevice,
-                onChanged: onToggleRemember,
+                value:       rememberDevice,
+                onChanged:   onToggleRemember,
                 activeColor: AppColors.primary,
                 side: const BorderSide(color: AppColors.border, width: 1.5),
               ),
-              const Text(
-                'Remember this device for 30 days',
-                style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+              const Expanded(
+                child: Text(
+                  'Remember this device for 30 days',
+                  style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                  softWrap: true,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 20),
 
-          /// Sign In button
+          // Error message
+          if (errorMessage != null) ...[
+            Container(
+              width:  double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color:        AppColors.red.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border:       Border.all(color: AppColors.red.withValues(alpha: 0.3)),
+              ),
+              child: Text(
+                errorMessage!,
+                style: const TextStyle(fontSize: 13, color: AppColors.red),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
@@ -333,15 +311,15 @@ class _LoginCard extends StatelessWidget {
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                elevation: 8,
-                shadowColor: AppColors.primary.withValues(alpha: 0.4),
+                padding:         const EdgeInsets.symmetric(vertical: 16),
+                shape:           RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                elevation:       8,
+                shadowColor:     AppColors.primary.withValues(alpha: 0.4),
               ),
               child: isLoading
                   ? const SizedBox(
                       height: 20,
-                      width: 20,
+                      width:  20,
                       child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                     )
                   : const Row(
@@ -356,33 +334,18 @@ class _LoginCard extends StatelessWidget {
           ),
           const SizedBox(height: 32),
 
-          /// SSO divider
           const _OrDivider(),
           const SizedBox(height: 16),
 
-          /// SSO buttons
           Row(
             children: [
-              Expanded(
-                child: _SsoButton(
-                  label: 'Google',
-                  icon: Icons.g_mobiledata,
-                  onPressed: () {},
-                ),
-              ),
+              Expanded(child: _SsoButton(label: 'Google',   icon: Icons.g_mobiledata, onPressed: () {})),
               const SizedBox(width: 16),
-              Expanded(
-                child: _SsoButton(
-                  label: 'SAML SSO',
-                  icon: Icons.terminal,
-                  onPressed: () {},
-                ),
-              ),
+              Expanded(child: _SsoButton(label: 'SAML SSO', icon: Icons.terminal,     onPressed: () {})),
             ],
           ),
           const SizedBox(height: 32),
 
-          /// Footer links
           const _FooterLinks(),
         ],
       ),
@@ -390,16 +353,16 @@ class _LoginCard extends StatelessWidget {
   }
 }
 
-// ─── Lock icon hero section ─────────────────────────────────────────────────
+// ─── Lock icon hero section ───────────────────────────────────────────────────
 class _LockIconSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
+      width:  double.infinity,
       height: 120,
       decoration: BoxDecoration(
-        color: AppColors.surfaceLight,
-        borderRadius: BorderRadius.circular(10),
+        color:         AppColors.surfaceLight,
+        borderRadius:  BorderRadius.circular(10),
       ),
       child: const Center(
         child: Icon(Icons.lock_open, color: AppColors.primary, size: 56),
@@ -408,14 +371,13 @@ class _LockIconSection extends StatelessWidget {
   }
 }
 
-// ─── Reusable text input field ───────────────────────────────────────────────
-/// HTML: <input type="email" class="w-full bg-slate-900/50 border...">
+// ─── Reusable text input field ────────────────────────────────────────────────
 class _InputField extends StatelessWidget {
-  final String label;
-  final String hint;
+  final String                label;
+  final String                hint;
   final TextEditingController controller;
-  final IconData prefixIcon;
-  final TextInputType keyboardType;
+  final IconData              prefixIcon;
+  final TextInputType         keyboardType;
 
   const _InputField({
     required this.label,
@@ -433,27 +395,18 @@ class _InputField extends StatelessWidget {
         Text(label, style: AppTextStyles.caption),
         const SizedBox(height: 8),
         TextField(
-          controller: controller,
+          controller:   controller,
           keyboardType: keyboardType,
           style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
           decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 14),
-            prefixIcon: Icon(prefixIcon, color: AppColors.textMuted, size: 20),
-            filled: true,
-            fillColor: Colors.black.withValues(alpha: 0.3),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.border),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
-            ),
+            hintText:    hint,
+            hintStyle:   const TextStyle(color: AppColors.textMuted, fontSize: 14),
+            prefixIcon:  Icon(prefixIcon, color: AppColors.textMuted, size: 20),
+            filled:      true,
+            fillColor:   Colors.black.withValues(alpha: 0.3),
+            border:       OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.primary, width: 1.5)),
             contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
           ),
         ),
@@ -462,10 +415,10 @@ class _InputField extends StatelessWidget {
   }
 }
 
-// ─── Password field with toggle visibility ───────────────────────────────────
+// ─── Password field ───────────────────────────────────────────────────────────
 class _PasswordField extends StatelessWidget {
   final TextEditingController controller;
-  final bool isVisible;
+  final bool         isVisible;
   final VoidCallback onToggle;
 
   const _PasswordField({
@@ -486,49 +439,34 @@ class _PasswordField extends StatelessWidget {
             TextButton(
               onPressed: () {},
               style: TextButton.styleFrom(
-                padding: EdgeInsets.zero,
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                padding:         EdgeInsets.zero,
+                minimumSize:     Size.zero,
+                tapTargetSize:   MaterialTapTargetSize.shrinkWrap,
               ),
-              child: const Text(
-                'Forgot Password?',
-                style: TextStyle(fontSize: 12, color: AppColors.primary),
-              ),
+              child: const Text('Forgot Password?',
+                  style: TextStyle(fontSize: 12, color: AppColors.primary)),
             ),
           ],
         ),
         const SizedBox(height: 8),
         TextField(
-          controller: controller,
-          /// obscureText hides password characters — like type="password" in HTML
+          controller:  controller,
           obscureText: !isVisible,
           style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
           decoration: InputDecoration(
-            hintText: '••••••••',
-            hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 14),
-            prefixIcon: const Icon(Icons.vpn_key_outlined, color: AppColors.textMuted, size: 20),
-            suffixIcon: IconButton(
-              icon: Icon(
-                isVisible ? Icons.visibility : Icons.visibility_off,
-                color: AppColors.textMuted,
-                size: 20,
-              ),
+            hintText:    '••••••••',
+            hintStyle:   const TextStyle(color: AppColors.textMuted, fontSize: 14),
+            prefixIcon:  const Icon(Icons.vpn_key_outlined, color: AppColors.textMuted, size: 20),
+            suffixIcon:  IconButton(
+              icon: Icon(isVisible ? Icons.visibility : Icons.visibility_off,
+                  color: AppColors.textMuted, size: 20),
               onPressed: onToggle,
             ),
-            filled: true,
-            fillColor: Colors.black.withValues(alpha: 0.3),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.border),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
-            ),
+            filled:      true,
+            fillColor:   Colors.black.withValues(alpha: 0.3),
+            border:       OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.primary, width: 1.5)),
             contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
           ),
         ),
@@ -537,7 +475,7 @@ class _PasswordField extends StatelessWidget {
   }
 }
 
-// ─── "Or login with" divider ─────────────────────────────────────────────────
+// ─── OR divider ───────────────────────────────────────────────────────────────
 class _OrDivider extends StatelessWidget {
   const _OrDivider();
 
@@ -556,10 +494,10 @@ class _OrDivider extends StatelessWidget {
   }
 }
 
-// ─── SSO option button ───────────────────────────────────────────────────────
+// ─── SSO button ───────────────────────────────────────────────────────────────
 class _SsoButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
+  final String     label;
+  final IconData   icon;
   final VoidCallback onPressed;
 
   const _SsoButton({required this.label, required this.icon, required this.onPressed});
@@ -569,10 +507,10 @@ class _SsoButton extends StatelessWidget {
     return OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
-        side: const BorderSide(color: AppColors.border),
+        side:            const BorderSide(color: AppColors.border),
         backgroundColor: AppColors.surfaceLight.withValues(alpha: 0.3),
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        padding:         const EdgeInsets.symmetric(vertical: 14),
+        shape:           RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -586,7 +524,7 @@ class _SsoButton extends StatelessWidget {
   }
 }
 
-// ─── Footer copyright + links ─────────────────────────────────────────────────
+// ─── Footer links ─────────────────────────────────────────────────────────────
 class _FooterLinks extends StatelessWidget {
   const _FooterLinks();
 
@@ -594,14 +532,15 @@ class _FooterLinks extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        const Text('© 2026 DataGuardian Systems. All rights reserved.', style: AppTextStyles.caption),
+        const Text('© 2026 DataGuardian Systems. All rights reserved.',
+            style: AppTextStyles.caption),
         const SizedBox(height: 8),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _Link('Terms of Service'),
+            _Link('Terms'),
             const SizedBox(width: 16),
-            _Link('Privacy Policy'),
+            _Link('Privacy'),
             const SizedBox(width: 16),
             _Link('Support'),
           ],
@@ -619,31 +558,23 @@ class _Link extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () {},
-      child: Text(
-        text,
-        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-      ),
+      child: Text(text,
+          style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
     );
   }
 }
 
-// Export AppTextStyles so login_screen.dart can use it
-// (In real project this would be imported from app_colors.dart)
+// ─── AppTextStyles ────────────────────────────────────────────────────────────
 class AppTextStyles {
   static const TextStyle heading = TextStyle(
-    fontSize: 22,
-    fontWeight: FontWeight.w700,
-    color: AppColors.textPrimary,
-    letterSpacing: -0.5,
+    fontSize: 22, fontWeight: FontWeight.w700,
+    color: AppColors.textPrimary, letterSpacing: -0.5,
   );
   static const TextStyle caption = TextStyle(
-    fontSize: 12,
-    color: AppColors.textSecondary,
+    fontSize: 12, color: AppColors.textSecondary,
   );
   static const TextStyle label = TextStyle(
-    fontSize: 10,
-    fontWeight: FontWeight.w700,
-    color: AppColors.textSecondary,
-    letterSpacing: 1.5,
+    fontSize: 10, fontWeight: FontWeight.w700,
+    color: AppColors.textSecondary, letterSpacing: 1.5,
   );
 }
