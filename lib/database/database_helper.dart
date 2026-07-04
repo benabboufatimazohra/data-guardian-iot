@@ -28,7 +28,25 @@ class DatabaseHelper {
   // ─── Initialisation ───────────────────────────────────────────────────────
   Future<Database> _initDb() async {
     final path = join(await getDatabasesPath(), 'dataguardian_v2.db');
-    return openDatabase(path, version: 1, onCreate: _onCreate);
+    return openDatabase(
+      path,
+      version: 2,
+      onCreate: _onCreate,
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await _rebuildDatabase(db);
+        }
+      },
+      onDowngrade: onDatabaseDowngradeDelete,
+    );
+  }
+
+  Future<void> _rebuildDatabase(Database db) async {
+    await db.execute('DROP TABLE IF EXISTS alerts');
+    await db.execute('DROP TABLE IF EXISTS sensor_readings');
+    await db.execute('DROP TABLE IF EXISTS esp_devices');
+    await db.execute('DROP TABLE IF EXISTS users');
+    await _onCreate(db, 2);
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -129,7 +147,7 @@ class DatabaseHelper {
     // Responsable assigné à l'ESP de démo
     await db.insert('users', {
       'full_name'       : 'Benabbou Fatima Zohra',
-      'email'           : 'Fatima@dataguardian.com',
+      'email'           : 'fatima@dataguardian.com',
       'password_hash'   : _hashPassword('Resp@1234'),
       'role'            : 'responsable',
       'assigned_esp_id' : 'ESP8266-01',
