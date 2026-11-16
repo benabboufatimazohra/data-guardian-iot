@@ -7,8 +7,7 @@ from machine import Pin
 import dht
 
 # ── Config ────────────────────────────────────────────────────────────
-SSID          = "***REMOVED***"
-WIFI_PASSWORD = "***REMOVED***"
+from wifi_secrets import SSID, WIFI_PASSWORD  # gitignored, see wifi_secrets.example.py
 DEVICE_ID     = "ESP8266-01"
 
 TEMP_WARNING  = 32.0

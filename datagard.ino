@@ -23,8 +23,9 @@
 #include <math.h>
 
 // ── Config ────────────────────────────────────────────────────────────
-const char* SSID          = "***REMOVED***";
-const char* WIFI_PASSWORD = "***REMOVED***";
+#include "secrets.h"   // Wi-Fi credentials — gitignored, see secrets.example.h
+const char* SSID          = WIFI_SSID_VALUE;
+const char* WIFI_PASSWORD = WIFI_PASS_VALUE;
 const char* DEVICE_ID     = "ESP8266-01";
 
 const float TEMP_WARNING  = 32.0;
